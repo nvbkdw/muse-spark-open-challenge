@@ -575,34 +575,48 @@ def _pack_compressed(w, wt, cl):
     return packed, exc_off, exc, 2.0 ** (base - 112)
 
 
-def _cfg(wt, wk, d, cl, xk, ns):
-    return {mb: (wt, wk, d, cl, xk, ns) for mb in (1, 2, 3, 4)}
-
-
-# (layer, variant) -> {MB: (WT tiles per row group, WK k-split warps, D prefetch depth, CL cluster size,
-#                         XK chunks per x slot, NSLOT x ring depth)}
+# Per-shape kernel configuration, tuned on the judge GPU (H200) with diagnostic check runs.
+# (layer, variant) -> {bucket: (WT tiles per row group, WK k-split warps, D prefetch depth, CL cluster size,
+#                               XK chunks per x slot, NSLOT x ring depth)}, or None -> cuBLAS on the raw weights.
+# bucket: "m1" for m == 1..7, then by MB = ceil(m / 8) (1 -> m 8, 2 -> m 9..16, 3, 4 -> m 17..32).
 CONFIGS = {
-    ("qkv_gate", "full"): _cfg(3, 4, 4, 2, 4, 4),
-    ("o", "full"): _cfg(4, 2, 4, 1, 4, 4),
-    ("pooler", "full"): _cfg(4, 4, 4, 2, 4, 4),
-    ("unpooler", "full"): _cfg(8, 2, 4, 2, 4, 4),
-    ("unpooler", "slice"): _cfg(1, 8, 4, 2, 8, 4),
-    ("router", "full"): _cfg(1, 8, 4, 4, 8, 4),
+    ("qkv_gate", "full"): {"m1": (3, 4, 4, 2, 8, 4), 1: (6, 2, 4, 4, 8, 4), 2: (3, 4, 4, 2, 8, 4),
+                           3: (3, 4, 4, 2, 8, 4), 4: None},
+    ("o", "full"): {"m1": (4, 4, 2, 1, 8, 2), 1: (4, 4, 2, 1, 8, 2), 2: None, 3: None, 4: None},
+    ("pooler", "full"): {"m1": (4, 4, 2, 2, 8, 4), 1: (4, 4, 4, 2, 8, 4), 2: (4, 4, 2, 2, 8, 4),
+                         3: (4, 4, 2, 2, 8, 4), 4: None},
+    ("unpooler", "full"): {2: None, 3: None, 4: None},
+    ("unpooler", "slice"): {"m1": (1, 8, 4, 2, 16, 2), 1: (1, 8, 4, 2, 8, 4)},
+    ("router", "full"): {"m1": (1, 8, 4, 4, 16, 4), 1: (1, 8, 4, 4, 16, 4), 2: (1, 8, 4, 4, 16, 4),
+                         3: (1, 8, 4, 4, 16, 4), 4: (1, 8, 4, 4, 16, 4)},
 }
 
 
-if os.environ.get("SKINNY_CFG_OVERRIDE"):  # local tuning only
+def _bucket(m):
+    return "m1" if m < 8 else (m + 7) // 8
+
+
+if os.environ.get("SKINNY_CFG_OVERRIDE"):  # local tuning only: {(layer, variant): cfg} for every bucket
     import ast
     for _k, _v in ast.literal_eval(os.environ["SKINNY_CFG_OVERRIDE"]).items():
-        CONFIGS[_k] = _cfg(*_v)
+        CONFIGS[_k] = {b: _v for b in ("m1", 1, 2, 3, 4)}
+
+
+def _mb_of(bucket):
+    return 1 if bucket == "m1" else bucket
 
 
 def _instantiations(configs):
     out = []
-    for (layer, _), per_mb in configs.items():
+    for (layer, _), per_b in configs.items():
         mode = 1 if layer == "router" else 0
-        for mb, (WT, WK, D, CL, XK, NS) in per_mb.items():
-            out.append((WT, WK, mb, D, CL, XK, NS, mode))
+        for b, cfg in per_b.items():
+            if cfg is None:
+                continue
+            WT, WK, D, CL, XK, NS = cfg
+            mbs = (1, 2, 3, 4) if b == "m1" else (b,)  # m1 config also serves m 2..7 (MB 1)
+            for mb in ((1,) if b == "m1" else (b,)):
+                out.append((WT, WK, mb, D, CL, XK, NS, mode))
     return out
 
 
@@ -615,9 +629,12 @@ def _layer_weight(weights, layer, variant, hi=None, lo=None):
 
 def build_packs(weights, configs, hi, lo, packs=None, dev=None):
     packs = {} if packs is None else packs
-    for (layer, variant), per_mb in configs.items():
+    for (layer, variant), per_b in configs.items():
         wv = None
-        for mb, (WT, WK, D, CL, XK, NS) in per_mb.items():
+        for b, cfg in per_b.items():
+            if cfg is None:
+                continue
+            WT, WK, D, CL, XK, NS = cfg
             key = (layer, variant, WT, CL)
             if key in packs:
                 continue
@@ -640,8 +657,7 @@ def prepare(weights: Weights):
     hi = r.to(torch.bfloat16)
     lo = (r - hi.float()).to(torch.bfloat16)
     st["hi"], st["lo"] = hi, lo
-    st["router_hi_t"] = hi.t().contiguous()
-    st["router_lo_t"] = lo.t().contiguous()
+    st["router_hl_t"] = torch.cat([hi, lo], 0).t().contiguous()  # [K, 512]: one GEMM for hi and lo
     st["packs"] = build_packs(weights, CONFIGS, hi, lo)
     st["dummy_off"] = torch.zeros(1024, dtype=torch.int32, device=dev)
     st["dummy_exc"] = torch.zeros((1, 4), dtype=torch.int32, device=dev)
@@ -673,14 +689,15 @@ def kernel_fn(data: Inputs, st) -> torch.Tensor:
     m = x.shape[0]
     if m <= 32:
         variant = "slice" if (layer == "unpooler" and n == 1024) else "full"
-        out = run_skinny(st, x, layer, variant, st["configs"][(layer, variant)][(m + 7) // 8])
-        if out is not None:
-            return out
+        cfg_ = st["configs"][(layer, variant)].get(_bucket(m))
+        if cfg_ is not None:
+            out = run_skinny(st, x, layer, variant, cfg_)
+            if out is not None:
+                return out
     raw = st["raw"]
     if layer != "router":
         return F.linear(x, raw[layer][:n])
     if m <= 8:
         return F.linear(x.float(), raw["router"])
-    acc = torch.mm(x, st["router_hi_t"], out_dtype=torch.float32)
-    acc += torch.mm(x, st["router_lo_t"], out_dtype=torch.float32)
-    return acc
+    o = torch.mm(x, st["router_hl_t"], out_dtype=torch.float32)  # BF16 hi/lo split, FP32 accumulation
+    return o[:, :256] + o[:, 256:]
