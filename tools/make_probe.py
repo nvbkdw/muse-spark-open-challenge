@@ -24,8 +24,7 @@ void stream(torch::Tensor src, torch::Tensor out, int64_t grid, int64_t threads)
   ldg_stream_k<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>((const uint4*)src.data_ptr(), src.numel() / 16, (unsigned*)out.data_ptr());
 }
 '''
-sub = sub.replace('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); }',
-                  stream_src + 'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); m.def("stream", &stream); }')
+sub = sub.replace('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {', stream_src + 'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("stream", &stream);')
 assert 'm.def("stream"' in sub
 driver = r'''
 
@@ -46,7 +45,7 @@ def prepare(weights):
     st = _orig_prepare(weights)
     st["ext"] = ext
     dev = weights["qkv_gate"].device
-    flush = torch.empty(256 << 20, dtype=torch.uint8, device=dev)
+    flush = torch.empty(512 << 20, dtype=torch.uint8, device=dev)
     e0, e1 = torch.cuda.Event(True), torch.cuda.Event(True)
     junk = torch.zeros(1, device=dev)
 
@@ -62,7 +61,7 @@ def prepare(weights):
     def tmed(g, reps=15):
         ts = []
         for _ in range(reps):
-            flush.zero_()
+            flush.sum()
             e0.record(); g.replay(); e1.record(); e1.synchronize()
             ts.append(e0.elapsed_time(e1) * 1e3)
         return statistics.median(ts)
@@ -101,7 +100,7 @@ driver = driver.replace("    import reference_free_inputs as _ri  # noqa  (place
         out = run_skinny(st, x, layer, var, cfg); torch.cuda.synchronize()
         err = float((out.float() - ref).norm() / ref.norm())
         t = tmed(g) - fixed
-        flush.zero_(); st["tdbg"].zero_(); torch.cuda.synchronize()
+        flush.sum(); st["tdbg"].zero_(); torch.cuda.synchronize()
         g.replay(); torch.cuda.synchronize()
         td = st["tdbg"][: 132 * 8].view(-1, 8)[:, :6].double()
         valid = td[:, 0] > 0

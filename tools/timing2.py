@@ -13,6 +13,7 @@ for s in sys.argv[2:]:
     sub.kernel_fn(data, st); torch.cuda.synchronize()
     t = st["tdbg"].view(-1, 8)[:132].double()
     t = t[t[:, 0] > 0]
+    if len(t) == 0: continue
     t0 = t[:, 0].min()
     out = []
     for i, nm in names.items():
