@@ -4,7 +4,7 @@ import reference
 spec = importlib.util.spec_from_file_location("sub", sys.argv[1]); sub = importlib.util.module_from_spec(spec); spec.loader.exec_module(sub)
 w = reference.generate_weights(reference.WEIGHTS_SEED); st = sub.prepare(w)
 flush = torch.empty(512 * 1024 * 1024, dtype=torch.uint8, device="cuda")
-names = {0: "start", 1: "contrib_rel", 2: "xready", 3: "poll_ok", 4: "loop_end", 5: "flush_end", 7: "prefetch_done"}
+names = {0: "start", 2: "xready", 4: "loop_end", 1: "exc_added", 3: "wk_staged", 6: "pushed", 7: "csync", 5: "end"}
 for s in sys.argv[2:]:
     layer, m = s.split(":"); m = int(m)
     data = reference.generate_input(m, layer, seed=7)
@@ -12,9 +12,16 @@ for s in sys.argv[2:]:
     flush.zero_(); st["tdbg"].zero_(); torch.cuda.synchronize()
     sub.kernel_fn(data, st); torch.cuda.synchronize()
     t = st["tdbg"].view(-1, 8)[:132].double()
+    t = t[t[:, 0] > 0]
     t0 = t[:, 0].min()
     out = []
     for i, nm in names.items():
         col = t[:, i]; v = col[col > 0]
         if len(v): out.append(f"{nm} {((v - t0) / 1000).median():.2f}/{((v - t0) / 1000).max():.2f}(n{len(v)})")
     print(layer, m, " ".join(out))
+
+    h = st["tdbg"][132 * 8: 132 * 8 + 132 * 4].view(132, 4).double()
+    h = h[h[:, 0] > 0]
+    if len(h):
+        r = (h - t0) / 1000
+        print("  helper: start %.2f/%.2f  off_loaded %.2f/%.2f  x_loaded %.2f/%.2f  done %.2f/%.2f" % tuple(v for i in range(4) for v in (r[:, i].median(), r[:, i].max())))

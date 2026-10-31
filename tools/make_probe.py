@@ -24,8 +24,9 @@ void stream(torch::Tensor src, torch::Tensor out, int64_t grid, int64_t threads)
   ldg_stream_k<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>((const uint4*)src.data_ptr(), src.numel() / 16, (unsigned*)out.data_ptr());
 }
 '''
-sub = sub.replace('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); }',
-                  stream_src + 'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); m.def("stream", &stream); }')
+sub = sub.replace('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); m.def("occ", &occ); }',
+                  stream_src + 'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); m.def("occ", &occ); m.def("stream", &stream); }')
+assert 'm.def("stream"' in sub
 driver = r'''
 
 # ======================= H200 diagnostic sweep (check runs only) =======================
@@ -39,7 +40,7 @@ def prepare(weights):
     allcfg = dict(CONFIGS)
     insts = _instantiations(CONFIGS)
     for (layer, variant, mb, cfg) in SWEEP:
-        insts.append((cfg[0], cfg[1], mb, cfg[2], cfg[3], 1 if layer == "router" else 0))
+        insts.append((cfg[0], cfg[1], cfg[2], mb, cfg[3], cfg[4], cfg[5], 1 if layer == "router" else 0))
     ext = _load_ext(insts)
     print(f"PROBE compile {time.time()-t0:.1f}s insts {len(set(insts))}", flush=True)
     st = _orig_prepare(weights)
@@ -85,11 +86,21 @@ driver = driver.replace("    import reference_free_inputs as _ri  # noqa  (place
         var = "slice" if (layer == "unpooler" and m <= 8) else "full"
         K = weights[layer].shape[1]
         x = torch.randn((m, K), generator=gen, device=dev).to(torch.bfloat16)
-        build_packs(weights, {(layer, var): {mb: cfg}}, st["hi"], st["lo"], st["packs"])
-        if st["packs"][(layer, var, cfg[0], cfg[1])][0] == "raw":
+        try:
+            build_packs(weights, {(layer, var): {mb: cfg}}, st["hi"], st["lo"], st["packs"])
+        except Exception as e:
+            print("SWEEP pack fail", layer, cfg, e); continue
+        if st["packs"][(layer, var, cfg[0], cfg[2])][0] == "raw":
             print(f"SWEEP {layer} m{m} {cfg}: no compressed pack", flush=True); continue
         ref = F.linear(x.float(), weights[layer][: (1024 if var == "slice" else weights[layer].shape[0])].float())
-        g = graph(lambda: run_skinny(st, x, layer, var, cfg))
+        WT_, WK_, KB_, D_, DI_, CL_ = cfg
+        occn = -1
+        if CL_ > 1:
+            occn = ext.occ(WT_, WK_, KB_, mb, D_, DI_, CL_, 1 if layer == "router" else 0, 100 * 1024)
+        try:
+            g = graph(lambda: run_skinny(st, x, layer, var, cfg))
+        except Exception as e:
+            print(f"SWEEP {layer} m{m} {cfg}: FAIL {str(e)[:80]}", flush=True); torch.cuda.synchronize(); continue
         out = run_skinny(st, x, layer, var, cfg); torch.cuda.synchronize()
         err = float((out.float() - ref).norm() / ref.norm())
         t = tmed(g) - fixed
@@ -100,7 +111,7 @@ driver = driver.replace("    import reference_free_inputs as _ri  # noqa  (place
         td = td[valid]
         rel = (td - td[:, 0].min()) / 1000.0
         brk = " ".join(f"{nm} {rel[:, i].median():.2f}/{rel[:, i].max():.2f}" for nm, i in zip(names, (2, 4, 5)))
-        print(f"SWEEP {layer:8s} m{m:<2d} W{cfg[0]} KB{cfg[1]} D{cfg[2]} DI{cfg[3]}: {t:6.2f}us err {err:.1e} | {brk}", flush=True)
+        print(f"SWEEP {layer:8s} m{m:<2d} {cfg}: {t:6.2f}us err {err:.1e} occ {occn} | {brk}", flush=True)
     os.environ["SKINNY_DEFS"] = ""
     print(f"PROBE total {time.time()-t0:.1f}s", flush=True)
     return st
