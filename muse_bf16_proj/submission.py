@@ -52,12 +52,6 @@ CUDA_SRC = r"""
 #include <ATen/cuda/CUDAContext.h>
 #include <cuda_bf16.h>
 #include <stdint.h>
-#ifndef PFD
-#define PFD 4
-#endif
-#ifndef DINIT
-#define DINIT 2
-#endif
 
 struct Params {
   const uint8_t* w;         // packed stages: [S][STAGE_W + EXB]
@@ -146,44 +140,72 @@ __device__ __forceinline__ int2 ldg_i2(const void* p) {
   return v;
 }
 
-// W: 16-row tiles (= warps) per row group; KB: 64-wide (virtual) k chunks per superunit;
-// MB: 8-token blocks; D: register prefetch depth (units); RAW: plain bf16 fragments (router hi/lo).
-template <int W, int KB, int MB, int D, bool RAW, bool DUPX, bool OUTF32>
-__global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
+__device__ __forceinline__ void bar_sync_id(int id, int n) { asm volatile("bar.sync %0, %1;" :: "r"(id), "r"(n) : "memory"); }
+__device__ __forceinline__ void bar_arrive_id(int id, int n) { asm volatile("bar.arrive %0, %1;" :: "r"(id), "r"(n) : "memory"); }
+__device__ __forceinline__ void cluster_sync_all() {
+  asm volatile("barrier.cluster.arrive.release.aligned;\nbarrier.cluster.wait.acquire.aligned;" ::: "memory");
+}
+__device__ __forceinline__ uint32_t cluster_rank() { uint32_t r; asm volatile("mov.u32 %0, %%cluster_ctarank;" : "=r"(r)); return r; }
+__device__ __forceinline__ float ld_dsmem_f32(const void* local_ptr, uint32_t rank) {
+  uint32_t a = smem_u32(local_ptr), ra; float v;
+  asm volatile("mapa.shared::cluster.u32 %0, %1, %2;" : "=r"(ra) : "r"(a), "r"(rank));
+  asm volatile("ld.shared::cluster.f32 %0, [%1];" : "=f"(v) : "r"(ra) : "memory");
+  return v;
+}
+
+// WT: 16-row tiles per row group; WK: warps splitting each superunit's KB chunks (compute warps = WT*WK);
+// KB: 64-wide (virtual) k chunks per superunit; MB: 8-token blocks; D/DI: register prefetch depth / initial;
+// CL: cluster size (CL > 1: each cluster owns one row group and splits K across its CTAs, reduced via DSMEM;
+// CL == 1: stream-K over superunits with a global fp32 workspace for row groups shared by several CTAs).
+// RAW: plain bf16 fragments (router hi/lo) instead of 12-bit codes.  The last warp is a helper warp.
+template <int WT, int WK, int KB, int MB, int D, int DI, int CL, bool RAW, bool DUPX, bool OUTF32>
+__global__ void __launch_bounds__((WT * WK + 1) * 32, 1) skinny_kernel(const Params p) {
+  constexpr int NW = WT * WK;                   // compute warps
   constexpr int NP = RAW ? 4 : 3;               // 16-byte parts per lane per unit
   constexpr int UB = NP * 512;
   constexpr int EXB = RAW ? 0 : 256;
-  constexpr int SU_BYTES = W * KB * UB + EXB;
+  constexpr int SU_BYTES = WT * KB * UB + EXB;
   constexpr int XCH = DUPX ? 64 : 128;          // x bytes per token per chunk
   constexpr int MT = MB * 8;
-  constexpr int ROWS = W * 16;
+  constexpr int ROWS = WT * 16;
+  constexpr int NT = (NW + 1) * 32;
+  constexpr int KPW = KB / WK;                  // chunks per warp per superunit
+  static_assert(KB % WK == 0, "KB % WK");
   extern __shared__ __align__(128) uint8_t smem[];
   uint64_t* xbar = reinterpret_cast<uint64_t*>(smem);  // [2]
-  uint8_t* xs = smem + 128;
 
   const int warp = threadIdx.x >> 5, lane = threadIdx.x & 31;
-  const int G = gridDim.x, bid = blockIdx.x;
-  const int S = p.S, SPR = p.SPR;
-  const int s0 = (int)(((long long)bid * S) / G);
-  const int s1 = (int)(((long long)(bid + 1) * S) / G);
+  const int SPR = p.SPR;
+  int s0, s1, G, bid;
+  if (CL > 1) {
+    const int rg = blockIdx.x / CL, r = blockIdx.x % CL;
+    s0 = rg * SPR + (r * SPR) / CL;
+    s1 = rg * SPR + ((r + 1) * SPR) / CL;
+    G = gridDim.x; bid = blockIdx.x;
+  } else {
+    G = gridDim.x; bid = blockIdx.x;
+    s0 = (int)(((long long)bid * p.S) / G);
+    s1 = (int)(((long long)(bid + 1) * p.S) / G);
+  }
+  const int S = p.S;
   const int n = s1 - s0;
   const int m = p.m;
-  const int nmax = (S + G - 1) / G;
+  const int nmax = (CL > 1) ? (SPR + CL - 1) / CL : (S + G - 1) / G;
   const int XROW = nmax * KB * XCH + 16;        // bytes per token row (16 mod 128 -> conflict-free)
-  const int nq = n * KB;
+  uint8_t* xs = smem + 128;
+  float* red = reinterpret_cast<float*>(xs + MT * XROW);   // [WK][ROWS][MT] partial sums
+  const int rgA = s0 / SPR, rgB = (s1 - 1) / SPR;
+  const bool first_contrib = (CL == 1) && (rgA * SPR < s0);
 #ifdef TIMING
   if (threadIdx.x == 0) { p.tdbg[bid * 8 + 0] = gtime(); unsigned sm; asm volatile("mov.u32 %0, %smid;" : "=r"(sm)); p.tdbg[bid * 8 + 6] = sm; }
 #endif
-  // ---- 1) x for this CTA's k-range -> shared memory (TMA), issued first; barrier 0 = first superunit ----
-  if (threadIdx.x == 0) {
-    asm volatile("mbarrier.init.shared::cta.b64 [%0], 1;" :: "r"(smem_u32(xbar)));
-    asm volatile("mbarrier.init.shared::cta.b64 [%0], 1;" :: "r"(smem_u32(xbar + 1)));
-    asm volatile("fence.mbarrier_init.release.cluster;" ::: "memory");
-  }
-  if (warp == 0) {
-    __syncwarp();
-    const int rgA = s0 / SPR, rgB = (s1 - 1) / SPR;
+
+  if (warp == NW) {
+    // ======================= helper warp: x -> smem (TMA), contributor release =======================
     if (lane == 0) {
+      asm volatile("mbarrier.init.shared::cta.b64 [%0], 1;" :: "r"(smem_u32(xbar)));
+      asm volatile("mbarrier.init.shared::cta.b64 [%0], 1;" :: "r"(smem_u32(xbar + 1)));
+      asm volatile("fence.mbarrier_init.release.cluster;" ::: "memory");
       mbar_expect_tx(xbar, (uint32_t)(m * KB * XCH));
       mbar_expect_tx(xbar + 1, (uint32_t)(m * (n - 1) * KB * XCH));
     }
@@ -205,82 +227,155 @@ __global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
                       reinterpret_cast<const uint8_t*>(p.x) + (size_t)tok * p.K * 2 + goff, bytes, xbar + 1);
       }
     }
+    __syncthreads();  // (A)
+    if (first_contrib) {
+      // last-segment-final CTAs never have a contributing first segment that is also their last
+      const int caB = (int)(((long long)(rgB * SPR + 1) * G - 1) / S);
+      const bool last_final = (rgB != rgA || true) && bid == caB && (((long long)(rgB * SPR + SPR) * G - 1) / S) != caB;
+      if (!(last_final && rgA == rgB)) {
+        bar_sync_id(2, NT);
+        if (lane == 0) {
+          asm volatile("fence.acq_rel.gpu;" ::: "memory");
+          asm volatile("red.relaxed.gpu.global.add.s32 [%0], 1;" :: "l"(p.cnt + rgA) : "memory");
+        }
+      }
+    }
+    if (CL > 1) { cluster_sync_all(); cluster_sync_all(); }
+    return;
   }
-  // ---- 2) prefetch the first D weight units into registers ----
-  const uint8_t* wbase = p.w + (size_t)s0 * SU_BYTES + warp * UB + lane * 16;
+
+  // ======================= compute warps =======================
+  const int wt = warp % WT, wk = warp / WT;
+  const uint8_t* wbase = p.w + (size_t)s0 * SU_BYTES + wt * UB + lane * 16;
+  const int nq = n * KPW;                       // units for this warp
   auto uaddr = [&](int q) -> const uint8_t* {
-    const int it = q / KB, j = q - it * KB;
-    return wbase + (size_t)it * SU_BYTES + j * W * UB;
+    const int it = q / KPW, jj = q - it * KPW, j = jj * WK + wk;
+    return wbase + (size_t)it * SU_BYTES + j * WT * UB;
+  };
+  auto eaddr = [&](int it) -> const uint8_t* {
+    return p.w + (size_t)(s0 + it) * SU_BYTES + WT * KB * UB + lane * 8;
   };
   uint4 buf[D][NP];
   int2 ebuf[D];
 #pragma unroll
-  for (int d = 0; d < (DINIT < D ? DINIT : D); ++d) {
+  for (int d = 0; d < (DI < D ? DI : D); ++d) {
     if (d < nq) {
       const uint8_t* u = uaddr(d);
 #pragma unroll
       for (int pp = 0; pp < NP; ++pp) buf[d][pp] = ldg_stream(u + pp * 512);
-      if (!RAW && (d % KB) == 0) ebuf[d] = ldg_i2(p.w + (size_t)(s0 + d / KB) * SU_BYTES + W * KB * UB + lane * 8);
+      if (!RAW && (d % KPW) == 0) ebuf[d] = ldg_i2(eaddr(d / KPW));
     }
   }
-  __syncthreads();
+  __syncthreads();  // (A)
 
   const int g = lane >> 2, t = lane & 3;
   float acc[MB][4];
 #pragma unroll
   for (int i = 0; i < MB; ++i) { acc[i][0] = acc[i][1] = acc[i][2] = acc[i][3] = 0.f; }
-  int cur_rg = s0 / SPR;
+  int cur_rg = rgA;
 
-  auto flush = [&](int rg) {
+  // partial sums of the row group -> red[wk] (smem), compute-warp barrier
+  auto stage_partials = [&]() {
+    float* rw = red + (size_t)wk * ROWS * MT;
+#pragma unroll
+    for (int mb = 0; mb < MB; ++mb)
+#pragma unroll
+      for (int e = 0; e < 4; ++e) {
+        const int tok = mb * 8 + 2 * t + (e & 1);
+        const int r = wt * 16 + g + (e >> 1) * 8;
+        rw[r * MT + tok] = acc[mb][e];
+      }
+  };
+
+  auto flush = [&](int rg, bool is_last) {
     const float sc = p.scale;
-    const int row0 = rg * ROWS + warp * 16 + g;
+    if (CL > 1) {
+      // cluster reduction: every CTA stages its warps' partials, then CTA r reduces rows r, r+CL, ...
+      stage_partials();
+      cluster_sync_all();
+      const uint32_t crank = cluster_rank();
+      for (int idx = threadIdx.x; idx < ROWS * m; idx += NW * 32) {
+        const int r = idx / m, tok = idx - r * m;
+        if ((r % CL) != (int)crank) continue;
+        float v = 0.f;
+#pragma unroll
+        for (int c = 0; c < CL; ++c)
+#pragma unroll
+          for (int k2 = 0; k2 < WK; ++k2) v += ld_dsmem_f32(red + ((size_t)k2 * ROWS + r) * MT + tok, c);
+        store_out<OUTF32>(p.out, (size_t)tok * p.N + rg * ROWS + r, v * sc);
+      }
+      cluster_sync_all();
+      return;
+    }
+    // reduce WK warps through smem first (if WK > 1)
+    if (WK > 1) {
+      stage_partials();
+      bar_sync_id(1, NW * 32);
+      if (wk == 0) {
+        for (int k2 = 1; k2 < WK; ++k2) {
+          const float* rw = red + (size_t)k2 * ROWS * MT;
+#pragma unroll
+          for (int mb = 0; mb < MB; ++mb)
+#pragma unroll
+            for (int e = 0; e < 4; ++e) {
+              const int tok = mb * 8 + 2 * t + (e & 1);
+              const int r = wt * 16 + g + (e >> 1) * 8;
+              acc[mb][e] += rw[r * MT + tok];
+            }
+        }
+      }
+      bar_sync_id(1, NW * 32);
+    }
+    const int row0 = rg * ROWS + wt * 16 + g;
     const int first = rg * SPR, last = rg * SPR + SPR - 1;
     const bool whole = (first >= s0) && (last < s1);
     if (whole) {
+      if (wk == 0) {
 #pragma unroll
-      for (int mb = 0; mb < MB; ++mb)
+        for (int mb = 0; mb < MB; ++mb)
 #pragma unroll
-        for (int e = 0; e < 4; ++e) {
-          const int tok = mb * 8 + 2 * t + (e & 1);
-          if (tok < m) store_out<OUTF32>(p.out, (size_t)tok * p.N + row0 + (e >> 1) * 8, acc[mb][e] * sc);
-        }
+          for (int e = 0; e < 4; ++e) {
+            const int tok = mb * 8 + 2 * t + (e & 1);
+            if (tok < m) store_out<OUTF32>(p.out, (size_t)tok * p.N + row0 + (e >> 1) * 8, acc[mb][e] * sc);
+          }
+      }
     } else {
       const int ca = (int)(((long long)(first + 1) * G - 1) / S);
       const int cl = (int)(((long long)(last + 1) * G - 1) / S);
       if (bid != ca) {
+        if (wk == 0) {
 #pragma unroll
-        for (int mb = 0; mb < MB; ++mb)
+          for (int mb = 0; mb < MB; ++mb)
 #pragma unroll
-          for (int h = 0; h < 2; ++h) {
-            const int tok = mb * 8 + 2 * t;
-            if (tok < m) red_add_v2(p.ws + (size_t)(row0 + h * 8) * 32 + tok, acc[mb][h * 2] * sc, acc[mb][h * 2 + 1] * sc);
-          }
-        bar_consumers(W * 32);
-        if (threadIdx.x == 0) {
-          asm volatile("fence.acq_rel.gpu;" ::: "memory");
-          asm volatile("red.relaxed.gpu.global.add.s32 [%0], 1;" :: "l"(p.cnt + rg) : "memory");
+            for (int h = 0; h < 2; ++h) {
+              const int tok = mb * 8 + 2 * t;
+              if (tok < m) red_add_v2(p.ws + (size_t)(row0 + h * 8) * 32 + tok, acc[mb][h * 2] * sc, acc[mb][h * 2 + 1] * sc);
+            }
         }
+        bar_arrive_id(2, NT);  // helper warp releases the counter
       } else {
         if (threadIdx.x == 0) {
           const int need = cl - ca;
           int v;
           do { asm volatile("ld.acquire.gpu.global.s32 %0, [%1];" : "=r"(v) : "l"(p.cnt + rg) : "memory"); } while (v < need);
         }
-        bar_consumers(W * 32);
+        bar_sync_id(1, NW * 32);
+        if (wk == 0) {
 #pragma unroll
-        for (int mb = 0; mb < MB; ++mb)
+          for (int mb = 0; mb < MB; ++mb)
 #pragma unroll
-          for (int h = 0; h < 2; ++h) {
-            const int tok = mb * 8 + 2 * t;
-            if (tok < m) {
-              const int row = row0 + h * 8;
-              float* wp = p.ws + (size_t)row * 32 + tok;
-              const float2 o = __ldcg(reinterpret_cast<const float2*>(wp));
-              *reinterpret_cast<float2*>(wp) = make_float2(0.f, 0.f);
-              store_out<OUTF32>(p.out, (size_t)tok * p.N + row, o.x + acc[mb][h * 2] * sc);
-              if (tok + 1 < m) store_out<OUTF32>(p.out, (size_t)(tok + 1) * p.N + row, o.y + acc[mb][h * 2 + 1] * sc);
+            for (int h = 0; h < 2; ++h) {
+              const int tok = mb * 8 + 2 * t;
+              if (tok < m) {
+                const int row = row0 + h * 8;
+                float* wp = p.ws + (size_t)row * 32 + tok;
+                const float2 o = __ldcg(reinterpret_cast<const float2*>(wp));
+                __stcg(reinterpret_cast<float2*>(wp), make_float2(0.f, 0.f));
+                store_out<OUTF32>(p.out, (size_t)tok * p.N + row, o.x + acc[mb][h * 2] * sc);
+                if (tok + 1 < m) store_out<OUTF32>(p.out, (size_t)(tok + 1) * p.N + row, o.y + acc[mb][h * 2 + 1] * sc);
+              }
             }
-          }
+        }
         if (threadIdx.x == 0) p.cnt[rg] = 0;
       }
     }
@@ -293,12 +388,12 @@ __global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
   if (threadIdx.x == 0) p.tdbg[bid * 8 + 2] = gtime();
 #endif
 #pragma unroll
-  for (int d = (DINIT < D ? DINIT : D); d < D; ++d) {
+  for (int d = (DI < D ? DI : D); d < D; ++d) {
     if (d < nq) {
       const uint8_t* u = uaddr(d);
 #pragma unroll
       for (int pp = 0; pp < NP; ++pp) buf[d][pp] = ldg_stream(u + pp * 512);
-      if (!RAW && (d % KB) == 0) ebuf[d] = ldg_i2(p.w + (size_t)(s0 + d / KB) * SU_BYTES + W * KB * UB + lane * 8);
+      if (!RAW && (d % KPW) == 0) ebuf[d] = ldg_i2(eaddr(d / KPW));
     }
   }
 
@@ -307,11 +402,11 @@ __global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
     for (int d = 0; d < D; ++d) {
       const int q = q0 + d;
       if (q < nq) {
-        const int it = q / KB, j = q - it * KB;
-        if (q == KB) mbar_wait(xbar + 1, 0);
-        if (j == 0) {
+        const int it = q / KPW, jj = q - it * KPW, j = jj * WK + wk;
+        if (it == 1 && jj == 0) mbar_wait(xbar + 1, 0);
+        if (jj == 0) {
           const int rg = (s0 + it) / SPR;
-          if (rg != cur_rg) { flush(cur_rg); cur_rg = rg; }
+          if (rg != cur_rg) { flush(cur_rg, false); cur_rg = rg; }
         }
         uint32_t a[4][4];
         if (RAW) {
@@ -330,15 +425,14 @@ __global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
           }
         }
         int2 ex = make_int2(0, 0);
-        if (!RAW && j == 0) ex = ebuf[d];
-        // refill this slot with unit q + D
+        if (!RAW && jj == 0) ex = ebuf[d];
         if (q + D < nq) {
           const uint8_t* u = uaddr(q + D);
 #pragma unroll
           for (int pp = 0; pp < NP; ++pp) buf[d][pp] = ldg_stream(u + pp * 512);
-          if (!RAW && ((q + D) % KB) == 0) ebuf[d] = ldg_i2(p.w + (size_t)(s0 + (q + D) / KB) * SU_BYTES + W * KB * UB + lane * 8);
+          if (!RAW && ((q + D) % KPW) == 0) ebuf[d] = ldg_i2(eaddr((q + D) / KPW));
         }
-        const uint8_t* xq = xs + q * XCH;
+        const uint8_t* xq = xs + (it * KB + j) * XCH;
 #pragma unroll
         for (int mb = 0; mb < MB; ++mb) {
           const uint8_t* xr = xq + (mb * 8 + g) * XROW;
@@ -355,15 +449,15 @@ __global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
 #pragma unroll
           for (int s = 0; s < 4; ++s) mma16816(acc[mb], a[s][0], a[s][1], a[s][2], a[s][3], b[2 * s], b[2 * s + 1]);
         }
-        if (!RAW && j == 0) {
-          // exact fix-up of this superunit's out-of-window weights: lane 0 holds the count, lane e entry e
+        if (!RAW && jj == 0) {
+          // exact fix-up of this superunit's out-of-window weights (entries for this warp's tile and chunks)
           const int ne = __shfl_sync(0xffffffffu, ex.x, 0);
           for (int e = 1; e <= ne; ++e) {
             const int meta = __shfl_sync(0xffffffffu, ex.x, e);
             const float dlt = __int_as_float(__shfl_sync(0xffffffffu, ex.y, e));
             const int row = meta >> 16;
-            if ((row >> 4) == warp && (row & 7) == g) {
-              const int kl = meta & 0xFFFF;
+            const int kl = meta & 0xFFFF;
+            if ((row >> 4) == wt && ((kl >> 6) % WK) == wk && (row & 7) == g) {
               const bool hi = (row >> 3) & 1;
               const uint8_t* xe = xs + it * KB * XCH + kl * 2;
 #pragma unroll
@@ -383,38 +477,39 @@ __global__ void __launch_bounds__(W * 32, 1) skinny_kernel(const Params p) {
 #ifdef TIMING
   if (threadIdx.x == 0) p.tdbg[bid * 8 + 4] = gtime();
 #endif
-  if (n > 0) flush(cur_rg);
+  if (n > 0) flush(cur_rg, true);
 #ifdef TIMING
   if (threadIdx.x == 0) p.tdbg[bid * 8 + 5] = gtime();
 #endif
 }
 
-template <int W, int KB, int MB, int D, bool RAW, bool DUPX, bool OUTF32>
+template <int WT, int WK, int KB, int MB, int D, int DI, int CL, bool RAW, bool DUPX, bool OUTF32>
 static void launch_t(const Params& p, int grid) {
   constexpr int XCH = DUPX ? 64 : 128;
-  const int nmax = (p.S + grid - 1) / grid;
-  const size_t smem = 128 + (size_t)MB * 8 * (nmax * KB * XCH + 16);
-  auto kern = skinny_kernel<W, KB, MB, D, RAW, DUPX, OUTF32>;
+  const int nmax = (CL > 1) ? (p.SPR + CL - 1) / CL : (p.S + grid - 1) / grid;
+  const size_t smem = 128 + (size_t)MB * 8 * (nmax * KB * XCH + 16) + (size_t)WK * WT * 16 * MB * 8 * 4;
+  auto kern = skinny_kernel<WT, WK, KB, MB, D, DI, CL, RAW, DUPX, OUTF32>;
   static int cur = 0;
   if ((int)smem > cur) {
     cudaFuncSetAttribute(kern, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
     cur = (int)smem;
   }
-  kern<<<grid, W * 32, smem, at::cuda::getCurrentCUDAStream()>>>(p);
+  cudaLaunchConfig_t cfg = {};
+  cfg.gridDim = dim3(grid);
+  cfg.blockDim = dim3((WT * WK + 1) * 32);
+  cfg.dynamicSmemBytes = smem;
+  cfg.stream = at::cuda::getCurrentCUDAStream();
+  cudaLaunchAttribute at[1];
+  at[0].id = cudaLaunchAttributeClusterDimension;
+  at[0].val.clusterDim.x = CL; at[0].val.clusterDim.y = 1; at[0].val.clusterDim.z = 1;
+  cfg.attrs = at; cfg.numAttrs = 1;
+  cudaLaunchKernelEx(&cfg, kern, p);
 }
 
-template <int W, int KB, int D, bool RAW, bool DUPX, bool OUTF32>
-static void launch_mb(const Params& p, int grid, int mb) {
-  switch (mb) {
-    case 1: launch_t<W, KB, 1, D, RAW, DUPX, OUTF32>(p, grid); break;
-    case 2: launch_t<W, KB, 2, D, RAW, DUPX, OUTF32>(p, grid); break;
-    case 3: launch_t<W, KB, 3, D, RAW, DUPX, OUTF32>(p, grid); break;
-    default: launch_t<W, KB, 4, D, RAW, DUPX, OUTF32>(p, grid); break;
-  }
-}
-
+// mode: 0 = 12-bit compressed bf16 -> bf16, 1 = raw hi/lo router (x duplicated) -> fp32
 void skinny(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor ws, torch::Tensor cnt,
-            int64_t N, int64_t SPR, int64_t grid, double scale, int64_t mode, torch::Tensor tdbg) {
+            int64_t N, int64_t SPR, int64_t grid, double scale, int64_t mode, int64_t WT, int64_t WK, int64_t KB,
+            int64_t D, int64_t DI, int64_t CL, torch::Tensor tdbg) {
   Params p;
   p.w = reinterpret_cast<const uint8_t*>(w.data_ptr());
   p.x = reinterpret_cast<const __nv_bfloat16*>(x.data_ptr());
@@ -425,47 +520,49 @@ void skinny(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor w
   p.K = (int)x.size(1);
   p.N = (int)N;
   p.SPR = (int)SPR;
-  const int rows_per_rg = (mode == 2) ? 256 : 128;
-  p.S = (int)((N / rows_per_rg) * SPR);
+  p.S = (int)((N / (16 * WT)) * SPR);
   p.scale = (float)scale;
   p.tdbg = reinterpret_cast<unsigned long long*>(tdbg.data_ptr());
-  const int mb = (p.m + 7) / 8;
+  const int MB = (p.m + 7) / 8;
   int g = (int)grid;
-  if (g > p.S) g = p.S;
-  if (mode == 0) launch_mb<8, 2, PFD, false, false, false>(p, g, mb);
-  else if (mode == 2) launch_mb<16, 1, 4, false, false, false>(p, g, mb);
-  else launch_mb<8, 2, 4, true, true, true>(p, g, mb);
+  if (CL > 1) g = (int)((N / (16 * WT)) * CL);
+  else if (g > p.S) g = p.S;
+  DISPATCH_TABLE
+  TORCH_CHECK(false, "skinny: no instantiation for WT=", WT, " WK=", WK, " KB=", KB, " D=", D, " DI=", DI, " CL=", CL, " MB=", MB, " mode=", mode);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("skinny", &skinny); }
 """
 
-_ext = None
+_ext = {}
 
 
-def _load_ext():
-    global _ext
-    if _ext is None:
+def _dispatch_src(insts):
+    lines = []
+    for (WT, WK, KB, MB, D, DI, CL, mode) in sorted(set(insts)):
+        raw = "true" if mode == 1 else "false"
+        lines.append(f"  if (WT == {WT} && WK == {WK} && KB == {KB} && MB == {MB} && D == {D} && DI == {DI} && CL == {CL} && mode == {mode}) "
+                     f"return launch_t<{WT}, {WK}, {KB}, {MB}, {D}, {DI}, {CL}, {raw}, {raw}, {raw}>(p, g);")
+    return "\n".join(lines)
+
+
+def _load_ext(insts):
+    key = tuple(sorted(set(insts)))
+    if key not in _ext:
         from torch.utils.cpp_extension import load_inline
+        import hashlib
         defs = os.environ.get("SKINNY_DEFS", "").split()
-        _ext = load_inline(
-            name="muse_proj_skinny_v2" + "".join("_" + "".join(c for c in d if c.isalnum()) for d in defs),
+        src = CUDA_SRC.replace("DISPATCH_TABLE", _dispatch_src(insts))
+        h = hashlib.sha1((src + " ".join(defs)).encode()).hexdigest()[:12]
+        _ext[key] = load_inline(
+            name=f"muse_proj_skinny_{h}",
             cpp_sources="",
-            cuda_sources=CUDA_SRC,
+            cuda_sources=src,
             extra_cuda_cflags=["-O3", "-gencode=arch=compute_90a,code=sm_90a", "-std=c++20"] + defs,
             extra_cflags=["-O3"],
             verbose=False,
         )
-    return _ext
-
-
-W_TILES = 8      # 16-row tiles per row group (= consumer warps)
-KB = 2           # 64-wide k chunks per pipeline stage
-_cfg_env = os.environ.get("SKINNY_CFG", "")
-# (layer, variant) -> (tiles per row group, chunks per stage, kernel mode)
-LAYER_CFG = {}
-if _cfg_env == "16":
-    LAYER_CFG = {(l, v): (16, 1, 2) for l in ("qkv_gate", "o", "pooler", "unpooler") for v in ("full", "slice")}
+    return _ext[key]
 
 
 def _frag_order(w, n_rows, kv, wt=8):
@@ -475,9 +572,9 @@ def _frag_order(w, n_rows, kv, wt=8):
     return v.permute(0, 4, 1, 6, 3, 5, 7, 2, 8)        # rg, ch, tile, s, g, t, qhi, h, qlo
 
 
-def _pack_raw(w):
+def _pack_raw(w, W_TILES=8):
     n_rows, kv = w.shape
-    v = _frag_order(w, n_rows, kv).contiguous()
+    v = _frag_order(w, n_rows, kv, W_TILES).contiguous()
     return v.view(torch.uint8).reshape(-1)
 
 
@@ -486,7 +583,7 @@ EXB_MAX = 31
 
 
 def _pack_compressed(w, W_TILES=8, KB=2):
-    """Lossless 12-bit packing into [superunit][weights 24 KiB | exception block 256 B].
+    """Lossless 12-bit packing into [superunit][weights | 256 B exception block].
 
     Returns (packed uint8, scale) or None when the weights do not fit the format."""
     n_rows, K = w.shape
@@ -513,7 +610,6 @@ def _pack_compressed(w, W_TILES=8, KB=2):
     words = torch.where(words >= 2**31, words - 2**32, words).to(torch.int32)
     nbytes = words.contiguous().view(torch.uint8).reshape(RG, CH, W_TILES, 1, 512)
     wpart = torch.cat([smb, nbytes], dim=3).reshape(S, -1)  # [S, KB*W*1536]
-    # exceptions -> per-superunit blocks
     rows, ks = (~inwin).nonzero(as_tuple=True)
     blocks = torch.zeros((S, EXB_INTS), dtype=torch.int32, device=w.device)
     if rows.numel():
@@ -535,41 +631,89 @@ def _pack_compressed(w, W_TILES=8, KB=2):
     return packed, 2.0 ** (base - 112)
 
 
+def _cfg(wt, wk, kb, d, di, cl):
+    return {mb: (wt, wk, kb, d, di, cl) for mb in (1, 2, 3, 4)}
+
+
+# (layer, variant) -> {MB: (WT tiles per row group, WK k-split warps, KB chunks per superunit, D prefetch depth,
+#                         DI initial prefetch, CL cluster size)}
+CONFIGS = {
+    ("qkv_gate", "full"): _cfg(8, 1, 2, 4, 2, 1),
+    ("o", "full"): _cfg(4, 1, 16, 4, 2, 1),
+    ("pooler", "full"): _cfg(8, 1, 2, 4, 2, 1),
+    ("unpooler", "full"): _cfg(8, 1, 2, 4, 2, 1),
+    ("unpooler", "slice"): _cfg(1, 8, 32, 4, 2, 2),
+    ("router", "full"): _cfg(1, 8, 64, 4, 2, 4),
+}
+
+
+def _instantiations(configs):
+    out = []
+    for (layer, _), per_mb in configs.items():
+        mode = 1 if layer == "router" else 0
+        for mb, (WT, WK, KB, D, DI, CL) in per_mb.items():
+            out.append((WT, WK, KB, mb, D, DI, CL, mode))
+    return out
+
+
+def _layer_weight(weights, layer, variant, hi=None, lo=None):
+    if layer == "router":
+        return torch.stack([hi, lo], dim=2).reshape(256, -1).contiguous()  # interleaved [hi_k, lo_k]
+    w = weights[layer].contiguous()
+    return w[:1024].contiguous() if variant == "slice" else w
+
+
+def build_packs(weights, configs, hi, lo, packs=None):
+    packs = {} if packs is None else packs
+    for (layer, variant), per_mb in configs.items():
+        wv = None
+        for mb, (W, WK, KB, D, DI, CL) in per_mb.items():
+            key = (layer, variant, W, KB)
+            if key in packs:
+                continue
+            if wv is None:
+                wv = _layer_weight(weights, layer, variant, hi, lo)
+            spr = wv.shape[1] // 64 // KB
+            if layer == "router":
+                packs[key] = ("rtr", _pack_raw(wv, W), 1.0, wv.shape[0], spr)
+            else:
+                res = _pack_compressed(wv, W, KB)
+                packs[key] = ("raw", None, 1.0, wv.shape[0], spr) if res is None else ("cmp", res[0], res[1], wv.shape[0], spr)
+    return packs
+
+
 def prepare(weights: Weights):
     dev = weights["qkv_gate"].device
     nsm = torch.cuda.get_device_properties(dev).multi_processor_count
-    ext = _load_ext()
-    st = {"raw": {k: v.contiguous() for k, v in weights.items()}, "nsm": nsm}
+    ext = _load_ext(_instantiations(CONFIGS))
+    st = {"raw": {k: v.contiguous() for k, v in weights.items()}, "nsm": nsm, "ext": ext, "configs": CONFIGS}
     r = weights["router"]
     hi = r.to(torch.bfloat16)
     lo = (r - hi.float()).to(torch.bfloat16)
+    st["hi"], st["lo"] = hi, lo
     st["router_hi_t"] = hi.t().contiguous()
     st["router_lo_t"] = lo.t().contiguous()
-    st["router_hilo_t"] = torch.cat([hi, lo], 0).t().contiguous()  # [K, 512]
-    packs = {}
-    for name in ("qkv_gate", "o", "pooler", "unpooler"):
-        w = weights[name].contiguous()
-        variants = {"full": w}
-        if name == "unpooler":
-            variants["slice"] = w[:1024].contiguous()
-        for vname, wv in variants.items():
-            wt, kb, mode = LAYER_CFG.get((name, vname), (8, 2, 0))
-            res = _pack_compressed(wv, wt, kb)
-            if res is None:
-                packs[(name, vname)] = ("raw", None, 1.0, wv.shape[0], 0, 0)
-            else:
-                pk, sc = res
-                packs[(name, vname)] = ("cmp", pk, sc, wv.shape[0], wv.shape[1] // 64 // kb, mode)
-    # router: virtual K' = 2K, interleaved [hi_k, lo_k]
-    rv = torch.stack([hi, lo], dim=2).reshape(256, -1).contiguous()
-    packs[("router", "full")] = ("rtr", _pack_raw(rv), 1.0, 256, rv.shape[1] // 64 // KB, 1)
-    st["packs"] = packs
+    st["packs"] = build_packs(weights, CONFIGS, hi, lo)
     st["ws"] = torch.zeros(8192 * 32, dtype=torch.float32, device=dev)
     st["cnt"] = torch.zeros(1024, dtype=torch.int32, device=dev)
-    st["ext"] = ext
     st["tdbg"] = torch.zeros(132 * 8 * 4, dtype=torch.int64, device=dev)
     torch.cuda.synchronize()
     return st
+
+
+def run_skinny(st, x, layer, variant, cfg):
+    W, WK, KB, D, DI, CL = cfg
+    kind, pk, sc, N, SPR = st["packs"][(layer, variant, W, KB)]
+    m = x.shape[0]
+    if kind == "raw":
+        return None
+    if kind == "rtr":
+        out = torch.empty((m, N), dtype=torch.float32, device=x.device)
+        st["ext"].skinny(pk, x, out, st["ws"], st["cnt"], N, SPR, st["nsm"], 1.0, 1, W, WK, KB, D, DI, CL, st["tdbg"])
+    else:
+        out = torch.empty((m, N), dtype=torch.bfloat16, device=x.device)
+        st["ext"].skinny(pk, x, out, st["ws"], st["cnt"], N, SPR, st["nsm"], sc, 0, W, WK, KB, D, DI, CL, st["tdbg"])
+    return out
 
 
 def kernel_fn(data: Inputs, st) -> torch.Tensor:
@@ -578,18 +722,9 @@ def kernel_fn(data: Inputs, st) -> torch.Tensor:
     layer, n = cfg["layer"], cfg["n"]
     m = x.shape[0]
     if m <= 32:
-        if layer == "unpooler" and n == 1024:
-            key = (layer, "slice")
-        else:
-            key = (layer, "full")
-        kind, pk, sc, N, SPR, mode = st["packs"][key]
-        if kind == "rtr":
-            out = torch.empty((m, N), dtype=torch.float32, device=x.device)
-            st["ext"].skinny(pk, x, out, st["ws"], st["cnt"], N, SPR, st["nsm"], 1.0, 1, st["tdbg"])
-            return out
-        if kind == "cmp":
-            out = torch.empty((m, N), dtype=torch.bfloat16, device=x.device)
-            st["ext"].skinny(pk, x, out, st["ws"], st["cnt"], N, SPR, st["nsm"], sc, mode, st["tdbg"])
+        variant = "slice" if (layer == "unpooler" and n == 1024) else "full"
+        out = run_skinny(st, x, layer, variant, st["configs"][(layer, variant)][(m + 7) // 8])
+        if out is not None:
             return out
     raw = st["raw"]
     if layer != "router":
