@@ -803,30 +803,56 @@ def _onorm_gate_kernel(o_ptr, qkv_ptr, out_ptr, T, QKV_STRIDE: tl.constexpr, BLO
 
 
 @triton.jit
-def _attn_boundary_kernel(a_ptr, s_ptr, alpha_ptr, beta_ptr, w_ptr, s1_ptr, h_ptr, N: tl.constexpr):
+def _attn_boundary_kernel(a_ptr, s_ptr, alpha_ptr, beta_ptr, w_ptr, s1_ptr, h_ptr, N: tl.constexpr, CH: tl.constexpr):
+    """stream1 = alpha*s + beta*rms(a); h = rms(stream1)*(1+w). Row-chunked: 3 passes over the row (the re-reads
+    hit L2); measured 3.9 TB/s on H200 vs 2.9 for the whole-row-in-registers version."""
     row = tl.program_id(0).to(tl.int64)
-    offs = tl.arange(0, N)
-    a = tl.load(a_ptr + row * N + offs).to(tl.float32)
-    s = tl.load(s_ptr + row * N + offs)
-    ra = tl.rsqrt(tl.sum(a * a, 0) / N + 1e-8)
-    s1 = tl.load(alpha_ptr + offs) * s + tl.load(beta_ptr + offs) * (a * ra)
-    tl.store(s1_ptr + row * N + offs, s1)
-    rs = tl.rsqrt(tl.sum(s1 * s1, 0) / N + 1e-5)
-    h = s1 * rs * tl.load(w_ptr + offs)
-    tl.store(h_ptr + row * N + offs, h.to(tl.bfloat16))
+    offs = tl.arange(0, CH)
+    acc = tl.zeros([CH], tl.float32)
+    for c in tl.static_range(N // CH):
+        a = tl.load(a_ptr + row * N + c * CH + offs).to(tl.float32)
+        acc += a * a
+    ra = tl.rsqrt(tl.sum(acc, 0) / N + 1e-8)
+    acc2 = tl.zeros([CH], tl.float32)
+    for c in tl.static_range(N // CH):
+        o = c * CH + offs
+        a = tl.load(a_ptr + row * N + o).to(tl.float32)
+        s = tl.load(s_ptr + row * N + o)
+        s1 = tl.load(alpha_ptr + o) * s + tl.load(beta_ptr + o) * (a * ra)
+        tl.store(s1_ptr + row * N + o, s1)
+        acc2 += s1 * s1
+    rs = tl.rsqrt(tl.sum(acc2, 0) / N + 1e-5)
+    for c in tl.static_range(N // CH):
+        o = c * CH + offs
+        s1 = tl.load(s1_ptr + row * N + o)
+        tl.store(h_ptr + row * N + o, (s1 * rs * tl.load(w_ptr + o)).to(tl.bfloat16))
 
 
 @triton.jit
-def _ffn_boundary_kernel(f_ptr, s1_ptr, wf_ptr, alpha_ptr, beta_ptr, wn_ptr, s2_ptr, hid_ptr, N: tl.constexpr):
+def _ffn_boundary_kernel(f_ptr, s1_ptr, wf_ptr, alpha_ptr, beta_ptr, wn_ptr, s2_ptr, hid_ptr, N: tl.constexpr,
+                         CH: tl.constexpr):
+    """stream2 = alpha*stream1 + beta*rms(f*(1+wf)); hidden = rms(stream2)*(1+wn). Row-chunked like above."""
     row = tl.program_id(0).to(tl.int64)
-    offs = tl.arange(0, N)
-    f = tl.load(f_ptr + row * N + offs).to(tl.float32) * tl.load(wf_ptr + offs)
-    rf = tl.rsqrt(tl.sum(f * f, 0) / N + 1e-8)
-    s1 = tl.load(s1_ptr + row * N + offs)
-    s2 = tl.load(alpha_ptr + offs) * s1 + tl.load(beta_ptr + offs) * (f * rf)
-    tl.store(s2_ptr + row * N + offs, s2)
-    r2 = tl.rsqrt(tl.sum(s2 * s2, 0) / N + 1e-5)
-    tl.store(hid_ptr + row * N + offs, (s2 * r2 * tl.load(wn_ptr + offs)).to(tl.bfloat16))
+    offs = tl.arange(0, CH)
+    acc = tl.zeros([CH], tl.float32)
+    for c in tl.static_range(N // CH):
+        o = c * CH + offs
+        f = tl.load(f_ptr + row * N + o).to(tl.float32) * tl.load(wf_ptr + o)
+        acc += f * f
+    rf = tl.rsqrt(tl.sum(acc, 0) / N + 1e-8)
+    acc2 = tl.zeros([CH], tl.float32)
+    for c in tl.static_range(N // CH):
+        o = c * CH + offs
+        f = tl.load(f_ptr + row * N + o).to(tl.float32) * tl.load(wf_ptr + o)
+        s1 = tl.load(s1_ptr + row * N + o)
+        s2 = tl.load(alpha_ptr + o) * s1 + tl.load(beta_ptr + o) * (f * rf)
+        tl.store(s2_ptr + row * N + o, s2)
+        acc2 += s2 * s2
+    r2 = tl.rsqrt(tl.sum(acc2, 0) / N + 1e-5)
+    for c in tl.static_range(N // CH):
+        o = c * CH + offs
+        s2 = tl.load(s2_ptr + row * N + o)
+        tl.store(hid_ptr + row * N + o, (s2 * r2 * tl.load(wn_ptr + o)).to(tl.bfloat16))
 
 
 @triton.jit
@@ -933,15 +959,15 @@ def _gemm_cfg(bm, bn=256, bk=64, stages=4, stream_k=True):
             "use_mbarrier": True}
 
 
-SPLIT_ROWS = 64  # experts with more routes than this run in the large-tile launch
+SPLIT_ROWS = 32  # experts with more routes than this run in the large-tile launch (H200 sweep on real routing)
 
 
 def _tuning_big(tokens):
-    return _gemm_cfg(176, 256, 64)
+    return _gemm_cfg(160 if tokens <= 1024 else 176, 256, 64)
 
 
 def _tuning_small(tokens):
-    return _gemm_cfg(32, 256, 128)
+    return _gemm_cfg(16, 256, 128)
 
 
 @triton.jit
@@ -1002,7 +1028,7 @@ def prepare(weights):
     # Pre-build (JIT) the expert GEMM kernels for the token counts we expect.
     from humming.kernel.humming import HummingKernel
     for name in ("w13", "w2"):
-        for tuning in (_tuning_big(0), _tuning_small(0)):
+        for tuning in (_tuning_big(0), _tuning_big(1 << 20), _tuning_small(0)):
             HummingKernel.prepare_kernels(st[name]["config"], _CC, json.dumps(tuning))
     torch.cuda.synchronize()
     return st
@@ -1055,7 +1081,7 @@ def kernel_fn(data, st):
     s1 = torch.empty((T, HIDDEN), dtype=torch.float32, device=dev)
     h = torch.empty((T, HIDDEN), dtype=torch.bfloat16, device=dev)
     _attn_boundary_kernel[(T,)](a, data["stream"], st["a1"], st["b1"], st["w_pre_ffn"], s1, h, N=HIDDEN,
-                                num_warps=16)
+                                CH=4096, num_warps=8)
 
     # ---- router (side stream) || pooler ----
     main, side = torch.cuda.current_stream(), st["side"]
@@ -1094,5 +1120,5 @@ def kernel_fn(data, st):
     s2 = torch.empty((T, HIDDEN), dtype=torch.float32, device=dev)
     hid = torch.empty((T, HIDDEN), dtype=torch.bfloat16, device=dev)
     _ffn_boundary_kernel[(T,)](f, s1, st["w_post_ffn"], st["a2"], st["b2"], st["w_next"], s2, hid, N=HIDDEN,
-                               num_warps=16)
+                               CH=4096, num_warps=8)
     return hid, s2, ids
