@@ -62,6 +62,7 @@ struct Params {
   const int4* exc;          // {row in row group, k (actual), delta bits, 0}
   int m, N, K;              // K: actual x row length
   int CPR;                  // 64-wide (virtual) chunks per row
+  int rotmul;               // chunk-order rotation multiplier (0 = none)
   float scale;
   unsigned long long* tdbg;
 };
@@ -158,11 +159,7 @@ __global__ void __launch_bounds__((WT * WK + 2) * 32, 1) skinny_kernel(const Par
   const int m = p.m;
   const int XROW = XK * XCH + 16;               // smem bytes per token row of a slot (16 mod 128)
   const int SLOTB = m * XROW;
-#ifdef NOROT
-  const int rot = 0;
-#else
-  const int rot = (int)((bid * 7u) % (unsigned)nslots);  // rotated chunk order spreads x reads over L2
-#endif
+  const int rot = (int)(((unsigned)bid * (unsigned)p.rotmul) % (unsigned)nslots);  // optional rotated chunk order
 #ifdef TIMING
   if (threadIdx.x == 0) p.tdbg[bid * 8 + 0] = gtime();
 #endif
@@ -856,7 +853,7 @@ void wgrun(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor ex
 // mode: 0 = 12-bit compressed bf16 -> bf16, 1 = raw hi/lo router (x duplicated) -> fp32
 void skinny(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor exc_off, torch::Tensor exc,
             int64_t N, int64_t CPR, double scale, int64_t mode, int64_t WT, int64_t WK, int64_t D, int64_t CL,
-            int64_t XK, int64_t NSLOT, torch::Tensor tdbg) {
+            int64_t XK, int64_t NSLOT, torch::Tensor tdbg, int64_t rotmul) {
   Params p;
   p.w = reinterpret_cast<const uint8_t*>(w.data_ptr());
   p.x = reinterpret_cast<const __nv_bfloat16*>(x.data_ptr());
@@ -867,6 +864,7 @@ void skinny(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor e
   p.K = (int)x.size(1);
   p.N = (int)N;
   p.CPR = (int)CPR;
+  p.rotmul = (int)rotmul;
   p.scale = (float)scale;
   p.tdbg = reinterpret_cast<unsigned long long*>(tdbg.data_ptr());
   const int MB = (p.m + 7) / 8;
@@ -1080,6 +1078,9 @@ if os.environ.get("WG_CFG_OVERRIDE"):  # local tuning only: {(layer, ntok): cfg}
         WG_CONFIGS[(_l, "full")][_nt] = _v
 
 
+ROTMUL = 7  # rotated per-CTA chunk order (A/B on the judge GPU: better or equal on every shape)
+
+
 def _bucket(m):
     return "m1" if m < 8 else (m + 7) // 8
 
@@ -1164,10 +1165,10 @@ def run_skinny(st, x, layer, variant, cfg):
     assert (CPR // CL) % XK == 0 and CPR % CL == 0 and XK % WK == 0
     if kind == "rtr":
         out = torch.empty((m, N), dtype=torch.float32, device=x.device)
-        st["ext"].skinny(pk, x, out, st["dummy_off"], st["dummy_exc"], N, CPR, 1.0, 1, WT, WK, D, CL, XK, NS, st["tdbg"])
+        st["ext"].skinny(pk, x, out, st["dummy_off"], st["dummy_exc"], N, CPR, 1.0, 1, WT, WK, D, CL, XK, NS, st["tdbg"], st.get("rotmul", ROTMUL))
     else:
         out = torch.empty((m, N), dtype=torch.bfloat16, device=x.device)
-        st["ext"].skinny(pk, x, out, eo, ex, N, CPR, sc, 0, WT, WK, D, CL, XK, NS, st["tdbg"])
+        st["ext"].skinny(pk, x, out, eo, ex, N, CPR, sc, 0, WT, WK, D, CL, XK, NS, st["tdbg"], st.get("rotmul", ROTMUL))
     return out
 
 
@@ -1176,7 +1177,7 @@ def kernel_fn(data: Inputs, st) -> torch.Tensor:
     cfg = data["config"]
     layer, n = cfg["layer"], cfg["n"]
     m = x.shape[0]
-    if m <= 32:
+    if m <= 32 or (layer == "router" and m <= 256):
         variant = "slice" if (layer == "unpooler" and n == 1024) else "full"
         cfg_ = st["configs"][(layer, variant)].get(_bucket(m))
         if cfg_ is not None:

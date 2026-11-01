@@ -80,8 +80,10 @@ def prepare(weights):
 driver = driver.replace("    import reference_free_inputs as _ri  # noqa  (placeholder, replaced below)\n", r'''
     gen = torch.Generator(device=dev).manual_seed(1)
     names = ["xready", "loop_end", "end"]
-    for (layer, variant, mb, cfg) in SWEEP:
-        m = {1: 1, 2: 16, 3: 24, 4: 32}[mb] if variant != "m8" else 8
+    sweep_list = [(l, v, mb, c, r) for (l, v, mb, c) in SWEEP for r in ROTS]
+    for (layer, variant, mb, cfg, rotm) in sweep_list:
+        st["rotmul"] = rotm
+        m = {1: 1, 2: 16, 3: 24, 4: 32, 16: 128, 32: 256}[mb] if variant != "m8" else 8
         var = "slice" if (layer == "unpooler" and m <= 8) else "full"
         K = weights[layer].shape[1]
         x = torch.randn((m, K), generator=gen, device=dev).to(torch.bfloat16)
@@ -107,7 +109,7 @@ driver = driver.replace("    import reference_free_inputs as _ri  # noqa  (place
         td = td[valid]
         rel = (td - td[:, 0].min()) / 1000.0
         brk = " ".join(f"{nm} {rel[:, i].median():.2f}/{rel[:, i].max():.2f}" for nm, i in zip(names, (2, 4, 5)))
-        print(f"SWEEP {layer:8s} m{m:<2d} {cfg}: {t:6.2f}us err {err:.1e} | {brk}", flush=True)
+        print(f"SWEEP {layer:8s} m{m:<2d} {cfg} rot{rotm}: {t:6.2f}us err {err:.1e} | {brk}", flush=True)
     os.environ["SKINNY_DEFS"] = ""
     print(f"PROBE total {time.time()-t0:.1f}s", flush=True)
     return st

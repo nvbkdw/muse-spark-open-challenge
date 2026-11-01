@@ -1,4 +1,5 @@
 STREAM_SIZES = []
+ROTS = (0,)
 SWEEP = []
 def add(layer, mbs, cfgs, var="x"):
     for c in cfgs:
