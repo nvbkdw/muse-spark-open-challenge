@@ -978,13 +978,24 @@ def _split_counts_kernel(cnt_ptr, big_ptr, small_ptr, THR: tl.constexpr):
     tl.store(small_ptr + e, tl.where(c > THR, 0, c))
 
 
-def _humming_run(bank, x, out, counts, tuning, valid_m):
+def _humming_run(bank, x, out, counts, tuning, valid_m, locks="locks"):
     from humming import ops
     t = bank["tensors"]
     return ops.humming_gemm(
         layer_config=bank["config"], compute_config=_CC, tuning_config=json.dumps(tuning),
         inputs=x, weight=t["weight"], weight_scale=t["weight_scale"], weight_scale_2=t.get("weight_scale_2"),
-        outputs=out, expert_layout=counts, locks=bank["locks"], top_k=1, valid_shape_m=valid_m)
+        outputs=out, expert_layout=counts, locks=bank[locks], top_k=1, valid_shape_m=valid_m)
+
+
+def _experts_gemm(st, name, x, out, cb, cs, tb, ts, valid_m):
+    """Large-expert launch on the current stream and small-expert launch on the side stream, concurrently (the
+    small launch is memory-bound and fills the large one's tail: -2..5%). Separate stream-K lock buffers."""
+    main, side = torch.cuda.current_stream(), st["side"]
+    side.wait_stream(main)
+    _humming_run(st[name], x, out, cb, tb, valid_m)
+    with torch.cuda.stream(side):
+        _humming_run(st[name], x, out, cs, ts, valid_m, locks="locks2")
+    main.wait_stream(side)
 
 
 # ----------------------------------------------------------------------------------------
@@ -1017,8 +1028,9 @@ def prepare(weights):
     st["inv_freq"] = (1.0 / (500000.0 ** (torch.arange(0, 64, 2, dtype=torch.float, device=dev) / 64))).contiguous()
     st["w13"] = _humming_prepare(weights["w13"], weights["w13_sf"], weights["w13_gs"])
     st["w2"] = _humming_prepare(weights["w2"], weights["w2_sf"], weights["w2_gs"])
-    st["w13"]["locks"] = torch.zeros(1024, dtype=torch.int32, device=dev)
-    st["w2"]["locks"] = torch.zeros(1024, dtype=torch.int32, device=dev)
+    for name in ("w13", "w2"):
+        st[name]["locks"] = torch.zeros(1024, dtype=torch.int32, device=dev)
+        st[name]["locks2"] = torch.zeros(1024, dtype=torch.int32, device=dev)
     st["cnt"] = torch.zeros(LOCAL_EXPERTS, dtype=torch.int32, device=dev)
     st["cnt_big"] = torch.zeros(LOCAL_EXPERTS, dtype=torch.int32, device=dev)
     st["cnt_small"] = torch.zeros(LOCAL_EXPERTS, dtype=torch.int32, device=dev)
@@ -1107,11 +1119,9 @@ def kernel_fn(data, st):
     cb, cs = st["cnt_big"], st["cnt_small"]
     _split_counts_kernel[(1,)](cnt, cb, cs, THR=SPLIT_ROWS, num_warps=1)
     tb, ts = _tuning_big(T), _tuning_small(T)
-    _humming_run(st["w13"], xg, h13, cb, tb, valid_m)
-    _humming_run(st["w13"], xg, h13, cs, ts, valid_m)
+    _experts_gemm(st, "w13", xg, h13, cb, cs, tb, ts, valid_m)
     _silu_mul_kernel[(T,)](h13, rowmap, inter, N=D_EXPERT, num_warps=8)
-    _humming_run(st["w2"], inter, y, cb, tb, valid_m)
-    _humming_run(st["w2"], inter, y, cs, ts, valid_m)
+    _experts_gemm(st, "w2", inter, y, cb, cs, tb, ts, valid_m)
     moe = torch.empty((T, D_EXPERT), dtype=torch.bfloat16, device=dev)
     _combine_kernel[(T,)](y, rowmap, tw, st["w_post_exp"], moe, N=D_EXPERT, num_warps=8)
 
