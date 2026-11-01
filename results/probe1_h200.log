@@ -1,0 +1,72 @@
+PROBE compile 56.7s insts 38
+PROBE fixed 4.93
+STREAM   6.3MB g1 t512:   3.10us  2.03TB/s
+STREAM   6.3MB g1 t1024:   2.94us  2.14TB/s
+STREAM   6.3MB g2 t512:   2.91us  2.16TB/s
+STREAM  12.6MB g1 t512:   4.54us  2.77TB/s
+STREAM  12.6MB g1 t1024:   4.70us  2.68TB/s
+STREAM  12.6MB g2 t512:   4.83us  2.61TB/s
+STREAM  28.3MB g1 t512:   8.96us  3.16TB/s
+STREAM  28.3MB g1 t1024:   8.67us  3.26TB/s
+STREAM  28.3MB g2 t512:   8.86us  3.19TB/s
+STREAM  50.3MB g1 t512:  14.27us  3.52TB/s
+STREAM  50.3MB g1 t1024:  13.82us  3.64TB/s
+STREAM  50.3MB g2 t512:  13.98us  3.60TB/s
+SWEEP qkv_gate m1  W8 KB2 D4 DI2:  13.63us err 1.7e-03 | xready 1.28/1.79 loop_end 9.73/11.01 flush_end 11.01/13.57
+SWEEP qkv_gate m1  W8 KB2 D6 DI2:  13.95us err 1.7e-03 | xready 1.28/1.79 loop_end 9.98/10.75 flush_end 11.01/13.31
+SWEEP qkv_gate m1  W8 KB2 D8 DI2:  14.43us err 1.6e-03 | xready 1.54/2.05 loop_end 10.50/11.52 flush_end 11.52/13.82
+SWEEP qkv_gate m1  W8 KB2 D8 DI4:  14.40us err 1.7e-03 | xready 2.05/2.30 loop_end 10.24/11.26 flush_end 11.52/14.08
+SWEEP qkv_gate m1  W16 KB1 D4 DI2:  14.43us err 1.7e-03 | xready 2.30/2.82 loop_end 9.98/11.26 flush_end 11.26/13.82
+SWEEP qkv_gate m1  W16 KB1 D6 DI2:  20.06us err 1.7e-03 | xready 3.33/4.35 loop_end 15.10/16.13 flush_end 16.38/18.94
+SWEEP qkv_gate m1  W16 KB2 D4 DI2:  14.21us err 1.6e-03 | xready 2.30/2.82 loop_end 9.22/10.75 flush_end 10.50/13.57
+SWEEP qkv_gate m1  W8 KB4 D4 DI2:  14.24us err 1.7e-03 | xready 1.54/2.30 loop_end 9.22/11.01 flush_end 10.50/13.57
+SWEEP qkv_gate m1  W8 KB2 D4 DI1:  13.82us err 1.6e-03 | xready 1.02/1.79 loop_end 9.73/10.75 flush_end 11.01/13.82
+SWEEP pooler   m1  W8 KB2 D4 DI2:  20.99us err 1.6e-03 | xready 1.54/2.56 loop_end 16.13/17.41 flush_end 17.41/20.74
+SWEEP pooler   m1  W8 KB2 D6 DI2:  20.35us err 1.7e-03 | xready 1.28/2.05 loop_end 15.62/16.90 flush_end 16.90/20.22
+SWEEP pooler   m1  W8 KB2 D8 DI2:  20.67us err 1.7e-03 | xready 1.28/2.05 loop_end 15.62/17.41 flush_end 17.15/20.22
+SWEEP pooler   m1  W8 KB2 D8 DI4:  20.51us err 1.7e-03 | xready 2.30/3.58 loop_end 16.13/17.41 flush_end 17.41/20.48
+SWEEP pooler   m1  W16 KB1 D4 DI2:  20.29us err 1.7e-03 | xready 2.30/3.33 loop_end 15.36/16.64 flush_end 16.38/19.71
+SWEEP pooler   m1  W16 KB1 D6 DI2:  27.62us err 1.6e-03 | xready 3.33/3.84 loop_end 21.50/23.55 flush_end 23.30/26.37
+SWEEP pooler   m1  W16 KB2 D4 DI2:  20.00us err 1.7e-03 | xready 2.30/3.07 loop_end 15.62/16.90 flush_end 16.90/19.71
+SWEEP pooler   m1  W8 KB4 D4 DI2:  20.29us err 1.7e-03 | xready 1.54/2.05 loop_end 15.36/16.64 flush_end 16.90/20.22
+SWEEP pooler   m1  W8 KB2 D4 DI1:  20.93us err 1.6e-03 | xready 1.02/1.54 loop_end 15.87/17.41 flush_end 16.90/20.22
+SWEEP unpooler m1  W8 KB2 D4 DI2:   6.98us err 1.6e-03 | xready 1.28/2.56 loop_end 3.58/4.61 flush_end 4.61/6.40
+SWEEP unpooler m1  W8 KB2 D6 DI2:   7.07us err 1.7e-03 | xready 1.28/1.79 loop_end 3.84/4.35 flush_end 4.61/6.40
+SWEEP unpooler m1  W8 KB2 D8 DI2:   7.14us err 1.7e-03 | xready 1.54/2.30 loop_end 4.10/4.61 flush_end 4.86/6.66
+SWEEP unpooler m1  W8 KB2 D8 DI4:   7.01us err 1.6e-03 | xready 2.05/2.56 loop_end 3.84/4.35 flush_end 4.61/6.66
+SWEEP unpooler m1  W16 KB1 D4 DI2:   7.23us err 1.6e-03 | xready 2.30/3.07 loop_end 4.10/4.86 flush_end 4.86/6.91
+SWEEP unpooler m1  W16 KB1 D6 DI2:   9.25us err 1.6e-03 | xready 3.33/4.35 loop_end 5.63/6.66 flush_end 6.66/8.96
+SWEEP unpooler m1  W16 KB2 D4 DI2:   6.88us err 1.7e-03 | xready 2.05/2.82 loop_end 3.58/4.10 flush_end 4.35/6.40
+SWEEP unpooler m1  W8 KB4 D4 DI2:   6.98us err 1.6e-03 | xready 1.79/2.05 loop_end 3.84/4.61 flush_end 4.86/6.40
+SWEEP unpooler m1  W8 KB2 D4 DI1:   6.94us err 1.6e-03 | xready 1.28/2.30 loop_end 3.84/4.61 flush_end 4.86/6.91
+SWEEP qkv_gate m32 W8 KB2 D4 DI2:  16.64us err 1.7e-03 | xready 2.56/3.58 loop_end 12.03/13.06 flush_end 13.31/16.38
+SWEEP unpooler m32 W8 KB2 D4 DI2:  26.82us err 1.7e-03 | xready 2.56/3.84 loop_end 19.97/20.99 flush_end 22.27/26.37
+SWEEP qkv_gate m32 W8 KB2 D6 DI2:  16.86us err 1.7e-03 | xready 2.56/3.58 loop_end 12.29/13.06 flush_end 13.57/16.38
+SWEEP unpooler m32 W8 KB2 D6 DI2:  26.56us err 1.7e-03 | xready 2.82/4.10 loop_end 20.74/22.53 flush_end 22.53/27.14
+SWEEP qkv_gate m32 W16 KB1 D4 DI2:  18.62us err 1.7e-03 | xready 3.58/4.86 loop_end 12.29/13.57 flush_end 14.08/17.92
+SWEEP unpooler m32 W16 KB1 D4 DI2:  26.56us err 1.7e-03 | xready 4.35/5.38 loop_end 18.94/21.25 flush_end 20.48/26.37
+SWEEP qkv_gate m32 W16 KB2 D4 DI2:  17.86us err 1.7e-03 | xready 3.07/3.58 loop_end 10.75/13.06 flush_end 12.54/17.15
+SWEEP unpooler m32 W16 KB2 D4 DI2:  24.96us err 1.7e-03 | xready 3.33/3.58 loop_end 17.41/18.69 flush_end 18.94/25.09
+SWEEP qkv_gate m32 W8 KB4 D4 DI2:  16.90us err 1.7e-03 | xready 3.33/3.58 loop_end 11.78/13.82 flush_end 13.06/17.41
+SWEEP unpooler m32 W8 KB4 D4 DI2:  25.79us err 1.7e-03 | xready 2.56/3.84 loop_end 19.46/22.02 flush_end 22.02/26.11
+SWEEP o        m1  W4 KB16 D4 DI2:   7.97us err 1.7e-03 | xready 1.28/1.54 loop_end 6.91/7.42 flush_end 7.17/7.68
+SWEEP o        m32 W4 KB16 D4 DI2:  10.94us err 1.7e-03 | xready 3.33/3.58 loop_end 9.22/9.98 flush_end 9.73/10.50
+SWEEP o        m1  W4 KB16 D8 DI2:   7.52us err 1.6e-03 | xready 1.02/1.02 loop_end 6.40/6.91 flush_end 6.66/6.91
+SWEEP o        m32 W4 KB16 D8 DI2:  11.14us err 1.7e-03 | xready 3.58/4.35 loop_end 8.96/9.98 flush_end 9.47/10.24
+SWEEP o        m1  W4 KB16 D8 DI4:   7.71us err 1.7e-03 | xready 1.79/1.79 loop_end 6.66/7.17 flush_end 6.91/7.17
+SWEEP o        m32 W4 KB16 D8 DI4:  10.69us err 1.7e-03 | xready 4.10/4.35 loop_end 9.22/9.73 flush_end 9.73/9.98
+SWEEP o        m1  W4 KB8 D4 DI2:  11.23us err 1.7e-03 | xready 1.02/1.79 loop_end 7.17/8.45 flush_end 7.17/10.75
+SWEEP o        m32 W4 KB8 D4 DI2:  14.08us err 1.7e-03 | xready 2.56/2.82 loop_end 9.47/10.50 flush_end 9.98/13.57
+SWEEP o        m1  W8 KB2 D4 DI2:  11.14us err 1.7e-03 | xready 2.05/2.30 loop_end 6.14/7.17 flush_end 7.68/10.50
+SWEEP o        m32 W8 KB2 D4 DI2:  13.73us err 1.7e-03 | xready 2.30/3.33 loop_end 7.94/9.73 flush_end 9.47/14.08
+SWEEP router   m1  W8 KB2 D4 DI2:   6.75us err 2.5e-06 | xready 1.54/2.30 loop_end 3.58/4.35 flush_end 4.61/6.66
+SWEEP router   m32 W8 KB2 D4 DI2:  10.40us err 2.5e-06 | xready 2.56/2.56 loop_end 5.12/5.38 flush_end 7.17/9.98
+SWEEP router   m1  W8 KB2 D8 DI2:   6.91us err 2.2e-06 | xready 1.54/2.56 loop_end 3.84/4.35 flush_end 4.86/6.14
+SWEEP router   m32 W8 KB2 D8 DI2:  10.37us err 2.5e-06 | xready 2.56/2.56 loop_end 5.12/5.63 flush_end 7.17/9.98
+SWEEP router   m1  W4 KB2 D4 DI2:   8.10us err 2.6e-06 | xready 1.02/1.54 loop_end 5.38/5.89 flush_end 6.14/8.19
+SWEEP router   m32 W4 KB2 D4 DI2:  11.07us err 2.6e-06 | xready 2.30/2.56 loop_end 6.91/7.68 flush_end 8.45/11.01
+SWEEP router   m1  W4 KB4 D8 DI2:   7.14us err 2.7e-06 | xready 1.28/1.79 loop_end 4.35/4.86 flush_end 5.12/6.66
+SWEEP router   m32 W4 KB4 D8 DI2:  10.62us err 2.5e-06 | xready 2.30/2.56 loop_end 6.40/6.66 flush_end 7.68/10.24
+SWEEP router   m1  W2 KB4 D8 DI2:  10.78us err 2.9e-06 | xready 0.77/1.79 loop_end 7.94/8.96 flush_end 8.96/10.50
+SWEEP router   m32 W2 KB4 D8 DI2:  13.79us err 2.7e-06 | xready 2.30/3.33 loop_end 9.73/10.50 flush_end 10.75/13.57
+PROBE total 104.0s

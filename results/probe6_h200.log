@@ -1,0 +1,68 @@
+PROBE compile 55.9s insts 59
+PROBE fixed 5.06
+SWEEP qkv_gate m1  (3, 4, 4, 2, 8, 4):  13.70us err 1.6e-03 | xready 1.28/1.28 loop_end 11.52/12.54 end 13.06/13.57
+SWEEP qkv_gate m16 (3, 4, 4, 2, 8, 4):  14.56us err 1.7e-03 | xready 1.54/1.54 loop_end 12.29/12.80 end 13.82/14.59
+SWEEP qkv_gate m32 (3, 4, 4, 2, 8, 4):  17.31us err 1.7e-03 | xready 2.30/2.56 loop_end 14.59/15.36 end 17.15/17.66
+SWEEP qkv_gate m1  (3, 4, 2, 2, 8, 4):  13.60us err 1.7e-03 | xready 1.02/1.02 loop_end 11.26/12.29 end 12.80/13.57
+SWEEP qkv_gate m16 (3, 4, 2, 2, 8, 4):  14.91us err 1.7e-03 | xready 1.28/1.54 loop_end 12.29/13.06 end 14.08/14.34
+SWEEP qkv_gate m32 (3, 4, 2, 2, 8, 4):  16.13us err 1.7e-03 | xready 2.05/2.30 loop_end 13.57/14.34 end 15.87/16.13
+SWEEP qkv_gate m1  (6, 2, 4, 4, 8, 4):  13.66us err 1.6e-03 | xready 1.02/1.28 loop_end 11.52/12.54 end 13.06/13.57
+SWEEP qkv_gate m16 (6, 2, 4, 4, 8, 4):  14.98us err 1.7e-03 | xready 1.79/1.79 loop_end 12.29/13.31 end 14.59/14.85
+SWEEP qkv_gate m32 (6, 2, 4, 4, 8, 4):  17.79us err 1.7e-03 | xready 2.56/2.82 loop_end 13.31/14.34 end 16.64/17.41
+SWEEP qkv_gate m1  (3, 4, 4, 2, 16, 2):  13.47us err 1.7e-03 | xready 1.28/1.28 loop_end 11.52/12.29 end 13.06/13.31
+SWEEP qkv_gate m16 (3, 4, 4, 2, 16, 2):  14.85us err 1.7e-03 | xready 1.54/1.79 loop_end 12.29/13.06 end 14.08/14.34
+SWEEP qkv_gate m32 (3, 4, 4, 2, 16, 2):  17.22us err 1.7e-03 | xready 2.82/3.84 loop_end 14.08/14.85 end 16.38/16.90
+SWEEP qkv_gate m8  (3, 4, 4, 2, 8, 4):  13.89us err 1.7e-03 | xready 1.28/1.54 loop_end 11.78/12.54 end 13.31/13.82
+SWEEP qkv_gate m8  (6, 2, 4, 4, 8, 4):  14.05us err 1.7e-03 | xready 1.28/1.54 loop_end 11.78/12.80 end 13.57/13.82
+SWEEP pooler   m1  (4, 4, 2, 2, 8, 4):  16.35us err 1.7e-03 | xready 1.02/1.02 loop_end 13.82/14.59 end 15.62/16.13
+SWEEP pooler   m16 (4, 4, 2, 2, 8, 4):  17.82us err 1.7e-03 | xready 1.54/1.54 loop_end 14.85/15.62 end 16.90/17.66
+SWEEP pooler   m32 (4, 4, 2, 2, 8, 4):  20.51us err 1.7e-03 | xready 2.30/3.07 loop_end 16.90/17.66 end 19.97/20.48
+SWEEP pooler   m1  (4, 4, 4, 2, 8, 4):  17.28us err 1.6e-03 | xready 1.54/1.79 loop_end 15.10/15.87 end 16.64/17.15
+SWEEP pooler   m16 (4, 4, 4, 2, 8, 4):  18.72us err 1.7e-03 | xready 1.79/2.05 loop_end 15.87/16.64 end 17.92/18.43
+SWEEP pooler   m32 (4, 4, 4, 2, 8, 4):  22.37us err 1.7e-03 | xready 3.07/4.35 loop_end 18.43/19.71 end 21.25/22.02
+SWEEP pooler   m1  (4, 4, 2, 2, 16, 2):  16.58us err 1.7e-03 | xready 1.02/1.02 loop_end 14.08/14.85 end 15.62/16.38
+SWEEP pooler   m16 (4, 4, 2, 2, 16, 2):  18.30us err 1.7e-03 | xready 1.79/2.56 loop_end 15.10/16.64 end 17.41/18.18
+SWEEP pooler   m32 (4, 4, 2, 2, 16, 2):  22.18us err 1.7e-03 | xready 3.07/4.35 loop_end 18.43/20.22 end 21.76/22.78
+SWEEP pooler   m1  (4, 2, 4, 2, 8, 4):  23.46us err 1.7e-03 | xready 1.02/1.28 loop_end 20.48/22.02 end 22.53/23.55
+SWEEP pooler   m16 (4, 2, 4, 2, 8, 4):  24.77us err 1.7e-03 | xready 1.79/1.79 loop_end 21.50/22.78 end 23.81/24.58
+SWEEP pooler   m32 (4, 2, 4, 2, 8, 4):  28.61us err 1.7e-03 | xready 2.30/2.30 loop_end 23.04/24.06 end 26.37/27.39
+SWEEP pooler   m8  (4, 4, 4, 2, 8, 4):  17.92us err 1.7e-03 | xready 1.54/1.54 loop_end 15.10/16.13 end 17.15/17.66
+SWEEP pooler   m8  (4, 4, 2, 2, 8, 4):  17.25us err 1.7e-03 | xready 1.28/1.28 loop_end 14.34/15.10 end 16.13/16.64
+SWEEP unpooler m16 (8, 2, 4, 2, 8, 4):  19.23us err 1.7e-03 | xready 1.79/2.05 loop_end 15.87/16.90 end 18.69/19.20
+SWEEP unpooler m32 (8, 2, 4, 2, 8, 4):  25.02us err 1.7e-03 | xready 4.86/5.89 loop_end 18.69/19.97 end 23.55/24.32
+SWEEP unpooler m16 (8, 2, 2, 2, 8, 4):  19.10us err 1.7e-03 | xready 1.54/1.54 loop_end 15.10/16.13 end 17.66/18.43
+SWEEP unpooler m32 (8, 2, 2, 2, 8, 4):  22.91us err 1.7e-03 | xready 3.33/3.84 loop_end 17.15/18.18 end 21.76/23.30
+SWEEP unpooler m16 (4, 4, 4, 1, 8, 4):  17.44us err 1.7e-03 | xready 1.54/1.79 loop_end 15.36/16.38 end 16.38/17.15
+SWEEP unpooler m32 (4, 4, 4, 1, 8, 4):  20.54us err 1.7e-03 | xready 3.07/4.10 loop_end 18.69/19.71 end 19.71/20.48
+SWEEP unpooler m16 (4, 4, 2, 1, 16, 2):  17.31us err 1.7e-03 | xready 1.79/2.82 loop_end 15.10/16.38 end 16.13/17.15
+SWEEP unpooler m32 (4, 4, 2, 1, 16, 2):  19.68us err 1.7e-03 | xready 2.82/3.84 loop_end 17.41/18.43 end 18.69/19.46
+SWEEP unpooler m1  (1, 8, 4, 2, 16, 2):   4.45us err 1.7e-03 | xready 1.02/1.28 loop_end 3.33/3.58 end 4.35/4.61
+SWEEP unpooler m1  (1, 8, 4, 2, 8, 4):   4.54us err 1.8e-03 | xready 1.28/1.54 loop_end 3.58/3.58 end 4.35/4.61
+SWEEP unpooler m1  (1, 8, 2, 2, 16, 2):   4.90us err 1.6e-03 | xready 0.77/1.02 loop_end 3.33/3.84 end 4.35/4.86
+SWEEP unpooler m8  (1, 8, 4, 2, 8, 4):   4.83us err 1.7e-03 | xready 1.28/1.54 loop_end 3.58/3.84 end 4.35/4.86
+SWEEP unpooler m8  (1, 8, 4, 2, 16, 2):   4.96us err 1.7e-03 | xready 1.54/2.56 loop_end 3.84/4.35 end 4.86/5.12
+SWEEP o        m1  (4, 4, 2, 1, 8, 2):   5.28us err 1.6e-03 | xready 1.02/1.02 loop_end 4.35/4.86 end 4.86/5.12
+SWEEP o        m16 (4, 4, 2, 1, 8, 2):   7.07us err 1.6e-03 | xready 2.05/2.82 loop_end 5.38/6.66 end 6.14/7.17
+SWEEP o        m32 (4, 4, 2, 1, 8, 2):   8.06us err 1.7e-03 | xready 2.30/2.82 loop_end 6.40/7.42 end 7.42/8.19
+SWEEP o        m1  (4, 2, 4, 1, 8, 2):   6.50us err 1.6e-03 | xready 1.02/1.28 loop_end 5.63/6.14 end 6.14/6.66
+SWEEP o        m16 (4, 2, 4, 1, 8, 2):   8.06us err 1.7e-03 | xready 1.54/2.56 loop_end 6.40/7.42 end 7.17/7.68
+SWEEP o        m32 (4, 2, 4, 1, 8, 2):   8.83us err 1.7e-03 | xready 2.05/2.56 loop_end 7.17/7.94 end 8.19/8.70
+SWEEP o        m1  (4, 4, 4, 1, 8, 2):   5.76us err 1.7e-03 | xready 1.28/1.54 loop_end 5.12/5.63 end 5.63/5.89
+SWEEP o        m16 (4, 4, 4, 1, 8, 2):   7.07us err 1.7e-03 | xready 2.05/3.58 loop_end 7.42/7.68 end 7.94/8.19
+SWEEP o        m32 (4, 4, 4, 1, 8, 2):   9.02us err 1.7e-03 | xready 2.30/3.07 loop_end 7.42/8.19 end 8.45/8.96
+SWEEP o m1 (4, 8, 2, 1, 8, 2): FAIL CUDA error: invalid argument
+SWEEP o m16 (4, 8, 2, 1, 8, 2): FAIL CUDA error: invalid argument
+SWEEP o m32 (4, 8, 2, 1, 8, 2): FAIL CUDA error: invalid argument
+SWEEP o        m8  (4, 4, 2, 1, 8, 2):   5.92us err 1.7e-03 | xready 1.28/2.05 loop_end 4.86/5.38 end 5.38/6.14
+SWEEP o m8 (4, 8, 2, 1, 8, 2): FAIL CUDA error: invalid argument
+SWEEP router   m1  (1, 8, 4, 4, 16, 4):   7.07us err 2.8e-06 | xready 1.02/1.28 loop_end 5.38/5.89 end 6.66/6.91
+SWEEP router   m16 (1, 8, 4, 4, 16, 4):   7.71us err 2.5e-06 | xready 1.28/1.54 loop_end 6.14/6.40 end 7.17/7.68
+SWEEP router   m32 (1, 8, 4, 4, 16, 4):   8.51us err 2.5e-06 | xready 1.79/1.79 loop_end 6.91/7.17 end 8.19/8.45
+SWEEP router   m1  (1, 8, 2, 4, 16, 4):   7.68us err 2.6e-06 | xready 0.77/0.77 loop_end 5.89/6.40 end 7.17/7.42
+SWEEP router   m16 (1, 8, 2, 4, 16, 4):   8.32us err 2.6e-06 | xready 1.28/1.54 loop_end 6.66/7.17 end 8.19/8.19
+SWEEP router   m32 (1, 8, 2, 4, 16, 4):   9.18us err 2.5e-06 | xready 1.54/1.79 loop_end 7.42/7.94 end 8.70/9.22
+SWEEP router   m1  (1, 8, 4, 4, 32, 2):   6.88us err 2.7e-06 | xready 1.02/1.28 loop_end 5.63/6.14 end 6.91/6.91
+SWEEP router   m16 (1, 8, 4, 4, 32, 2):   7.81us err 2.6e-06 | xready 1.28/1.54 loop_end 5.89/6.40 end 7.17/7.68
+SWEEP router   m32 (1, 8, 4, 4, 32, 2):   8.58us err 2.5e-06 | xready 1.79/1.79 loop_end 6.91/7.42 end 8.19/8.70
+SWEEP router   m8  (1, 8, 4, 4, 16, 4):   7.20us err 2.5e-06 | xready 1.28/1.28 loop_end 6.66/7.17 end 7.94/8.19
+PROBE total 105.5s

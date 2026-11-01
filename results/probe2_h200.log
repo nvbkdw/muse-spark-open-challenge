@@ -1,0 +1,52 @@
+PROBE compile 56.4s insts 41
+PROBE fixed 5.09
+STREAM   6.3MB g1 t512:   3.01us  2.09TB/s
+STREAM   6.3MB g1 t1024:   2.94us  2.14TB/s
+STREAM   6.3MB g2 t512:   2.94us  2.14TB/s
+STREAM   8.4MB g1 t512:   3.52us  2.39TB/s
+STREAM   8.4MB g1 t1024:   3.52us  2.39TB/s
+STREAM   8.4MB g2 t512:   3.65us  2.30TB/s
+STREAM  12.6MB g1 t512:   4.67us  2.70TB/s
+STREAM  12.6MB g1 t1024:   4.61us  2.73TB/s
+STREAM  12.6MB g2 t512:   4.80us  2.63TB/s
+SWEEP unpooler m1  (1, 8, 32, 4, 2, 2):   5.76us err 1.7e-03 | xready 1.54/1.79 loop_end 4.10/4.35 flush_end 5.38/5.63
+SWEEP unpooler m1  (1, 8, 32, 8, 2, 2):   5.73us err 1.8e-03 | xready 2.05/2.05 loop_end 4.35/4.86 flush_end 5.89/6.14
+SWEEP unpooler m1  (1, 4, 32, 8, 4, 2):   6.37us err 1.6e-03 | xready 1.79/2.05 loop_end 4.61/5.12 flush_end 5.89/6.40
+SWEEP unpooler m1  (1, 8, 64, 4, 2, 1):   5.98us err 1.7e-03 | xready 1.54/1.54 loop_end 5.38/5.63 flush_end 5.63/5.89
+SWEEP unpooler m1  (1, 8, 64, 8, 4, 1):   6.08us err 1.6e-03 | xready 2.05/2.05 loop_end 5.38/5.89 flush_end 5.63/6.14
+SWEEP unpooler m1  (1, 16, 64, 4, 2, 1):   6.30us err 1.6e-03 | xready 2.30/2.30 loop_end 5.38/5.89 flush_end 5.89/6.14
+SWEEP unpooler m1  (8, 1, 2, 4, 2, 1):   7.33us err 1.7e-03 | xready 1.54/2.30 loop_end 3.84/4.35 flush_end 4.10/6.91
+SWEEP unpooler m8  (1, 8, 32, 4, 2, 2):   6.66us err 1.6e-03 | xready 2.56/2.82 loop_end 4.86/5.38 flush_end 6.14/6.66
+SWEEP unpooler m8  (1, 8, 64, 8, 4, 1):   6.94us err 1.7e-03 | xready 3.07/3.07 loop_end 6.14/6.40 flush_end 6.40/6.91
+SWEEP router   m1  (1, 8, 64, 4, 2, 4):   7.33us err 2.3e-06 | xready 1.54/1.79 loop_end 5.63/6.14 flush_end 7.17/7.42
+SWEEP router   m32 (1, 8, 64, 4, 2, 4):   9.76us err 2.5e-06 | xready 2.56/2.56 loop_end 7.17/7.68 flush_end 9.47/9.98
+SWEEP router   m1  (1, 8, 64, 8, 4, 4):   6.69us err 2.4e-06 | xready 2.30/2.30 loop_end 5.38/5.63 flush_end 6.91/7.17
+SWEEP router   m32 (1, 8, 64, 8, 4, 4):   9.09us err 2.5e-06 | xready 2.82/3.33 loop_end 6.40/7.17 flush_end 8.96/9.22
+SWEEP router   m1  (1, 16, 64, 4, 2, 4):   6.69us err 2.5e-06 | xready 2.30/2.56 loop_end 4.61/4.86 flush_end 6.66/6.66
+SWEEP router   m32 (1, 16, 64, 4, 2, 4):  11.07us err 2.5e-06 | xready 3.33/4.10 loop_end 7.42/8.19 flush_end 11.01/11.01
+SWEEP router   m1  (8, 1, 2, 4, 2, 1):   7.10us err 2.7e-06 | xready 1.79/2.56 loop_end 3.84/4.35 flush_end 4.35/6.91
+SWEEP router   m32 (8, 1, 2, 4, 2, 1):   9.70us err 2.5e-06 | xready 2.30/2.82 loop_end 4.86/5.12 flush_end 5.38/9.22
+SWEEP router   m1  (1, 8, 128, 8, 4, 2):  10.37us err 2.8e-06 | xready 1.79/1.79 loop_end 8.96/9.47 flush_end 10.24/10.50
+SWEEP o        m1  (4, 1, 16, 4, 2, 1):   7.87us err 1.7e-03 | xready 1.02/1.02 loop_end 6.91/7.42 flush_end 6.91/7.42
+SWEEP o        m32 (4, 1, 16, 4, 2, 1):  10.82us err 1.7e-03 | xready 3.07/3.33 loop_end 9.22/9.73 flush_end 9.73/10.24
+SWEEP o        m1  (4, 2, 16, 4, 2, 1):   6.85us err 1.7e-03 | xready 2.56/2.56 loop_end 6.91/7.17 flush_end 6.91/7.42
+SWEEP o        m32 (4, 2, 16, 4, 2, 1):   9.63us err 1.7e-03 | xready 3.84/4.10 loop_end 7.94/8.70 flush_end 9.22/9.47
+SWEEP o        m1  (4, 4, 16, 4, 2, 1):   7.55us err 1.7e-03 | xready 2.56/2.82 loop_end 6.14/6.66 flush_end 6.40/6.91
+SWEEP o        m32 (4, 4, 16, 4, 2, 1):  13.02us err 1.7e-03 | xready 5.12/6.14 loop_end 9.73/11.01 flush_end 11.26/12.54
+SWEEP o        m1  (4, 2, 16, 8, 4, 1):   7.39us err 1.7e-03 | xready 2.56/2.56 loop_end 6.40/6.91 flush_end 6.66/7.17
+SWEEP o        m32 (4, 2, 16, 8, 4, 1):  11.17us err 1.7e-03 | xready 4.35/4.86 loop_end 9.22/9.73 flush_end 10.24/10.75
+SWEEP qkv_gate m1  (8, 1, 2, 4, 2, 1):  14.69us err 1.7e-03 | xready 1.28/1.79 loop_end 9.73/10.75 flush_end 10.24/14.34
+SWEEP qkv_gate m1  (8, 2, 2, 4, 2, 1):  19.55us err 1.6e-03 | xready 3.33/3.58 loop_end 13.57/14.59 flush_end 14.59/18.18
+SWEEP qkv_gate m1  (4, 2, 4, 4, 2, 1):  14.34us err 1.7e-03 | xready 1.79/2.05 loop_end 9.98/10.75 flush_end 10.75/13.82
+SWEEP qkv_gate m1  (1, 8, 8, 4, 2, 1):  14.98us err 1.6e-03 | xready 1.54/1.79 loop_end 11.52/12.29 flush_end 13.31/14.34
+SWEEP qkv_gate m1  (9, 1, 2, 4, 2, 1):  14.85us err 1.6e-03 | xready 1.54/2.30 loop_end 10.24/11.01 flush_end 10.75/14.59
+SWEEP pooler   m1  (8, 1, 2, 4, 2, 1):  22.14us err 1.7e-03 | xready 1.54/2.82 loop_end 16.90/18.43 flush_end 17.41/22.78
+SWEEP pooler   m1  (8, 2, 2, 4, 2, 1):  27.46us err 1.6e-03 | xready 3.33/3.84 loop_end 20.74/22.53 flush_end 22.02/26.62
+SWEEP pooler   m1  (4, 2, 4, 4, 2, 1):  21.82us err 1.6e-03 | xready 1.28/2.30 loop_end 15.87/17.15 flush_end 17.41/20.99
+SWEEP pooler   m1  (1, 8, 8, 4, 2, 1):  21.82us err 1.6e-03 | xready 1.79/2.56 loop_end 18.69/19.97 flush_end 20.22/21.76
+SWEEP qkv_gate m32 (8, 1, 2, 4, 2, 1):  18.08us err 1.7e-03 | xready 2.30/3.33 loop_end 11.78/12.80 flush_end 12.54/17.92
+SWEEP qkv_gate m32 (4, 2, 4, 4, 2, 1):  19.01us err 1.7e-03 | xready 2.56/3.58 loop_end 12.80/13.82 flush_end 14.08/18.18
+SWEEP qkv_gate m32 (9, 1, 2, 4, 2, 1):  18.24us err 1.7e-03 | xready 2.30/3.07 loop_end 12.03/12.80 flush_end 12.54/17.92
+SWEEP unpooler m32 (8, 1, 2, 4, 2, 1):  30.53us err 1.7e-03 | xready 2.56/3.58 loop_end 20.22/21.50 flush_end 22.02/30.72
+SWEEP unpooler m32 (16, 1, 2, 4, 2, 1):  35.58us err 1.7e-03 | xready 4.10/6.14 loop_end 23.04/25.60 flush_end 24.06/35.07
+PROBE total 104.1s
