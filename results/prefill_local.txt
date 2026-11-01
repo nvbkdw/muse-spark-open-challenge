@@ -1,0 +1,23 @@
+Local H100 (GPU 0), tools/prefill/judge.py --cases tests,scored --reps 7, submission at commit "experts: concurrency only up to 8192 tokens"
+(times: CUDA-graph replay median with a 512MB buffer write before each replay; ratio vs the judge's H200 SGLang time, indicative only)
+[0] test b1 ctx0 sliding L300        PASS update 3.258e-02 [bound 0.069]; attn input 2.083e-02 [0.044] | 427.4 us
+[1] test b1 ctx3000 full L753        PASS update 6.986e-02 [0.150]; attn input 4.493e-02 [0.111] | 702.5 us
+[2] test b2 ctx2500 sliding L753     PASS update 6.774e-02 [0.150]; attn input 4.389e-02 [0.108] | 1124.3 us
+[3] test b3 ctx5000 full L200 (page 64, outliers) PASS update 6.641e-02 [0.150]; attn input 3.380e-02 [0.084] | 697.0 us
+[4] test b1 ctx4096 sliding L4096    PASS update 4.744e-02 [0.113]; attn input 3.081e-02 [0.073] | 2546.5 us
+[5] turn 1 b1 ctx80000 sliding L753  PASS update 5.803e-02 [0.141]; attn input 3.724e-02 [0.090] | 700.1 us
+[6] turn 1 b1 ctx80000 full L753     PASS update 5.748e-02 [0.141]; attn input 3.668e-02 [0.090] | 1065.7 us
+[7] turn 4 b4 ctx80000 sliding L753  PASS update 5.415e-02 [0.130]; attn input 3.472e-02 [0.084] | 1948.2 us
+[8] turn 4 b4 ctx80000 full L753     PASS update 6.250e-02 [0.150]; attn input 4.014e-02 [0.098] | 3410.3 us
+[9] first b1 ctx0 full L16384        PASS update 2.134e-02 [0.044]; attn input 1.386e-02 [0.030] | 9622.8 us
+[10] first b1 ctx32768 sliding L16384 PASS update 3.261e-02 [0.072]; attn input 2.125e-02 [0.047] | 9585.0 us
+[11] first b1 ctx32768 full L16384   PASS update 5.598e-02 [0.133]; attn input 3.625e-02 [0.086] | 13012.4 us
+[12] first b1 ctx65536 full L16384   PASS update 5.861e-02 [0.140]; attn input 3.774e-02 [0.090] | 16241.6 us
+ALL PASS
+
+tools/prefill/robust.py (extra correctness):
+PASS b1 ctx3000 sliding L753 kv_scale=1/64          update 6.818e-02 [0.150]; attn input 4.451e-02 [0.110]
+PASS b1 ctx40000 full L1000 kv_scale=1/64 soft      update 5.858e-02 [0.143]; attn input 3.788e-02 [0.092]
+PASS b2 ctx20000 full L1500 agentic soft            update 5.864e-02 [0.143]; attn input 3.808e-02 [0.093]
+PASS b3 ctx7000 sliding L600 page64 mixed           update 6.804e-02 [0.150]; attn input 4.338e-02 [0.106]
+PASS b1 ctx10000 full L5000 soft                    update 5.296e-02 [0.129]; attn input 3.365e-02 [0.082]

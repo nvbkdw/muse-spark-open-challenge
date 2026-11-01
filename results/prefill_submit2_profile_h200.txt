@@ -1,0 +1,169 @@
+okc run dd81791432fe4b81 on muse_prefill_layer
+submission  /home/noetik/workspace/model-perf-optimizer/runs/model-opt-35cb0c72-e1413b91/muse_prefill_layer/submission.py
+status      ok
+passed      true
+speedup     1.5428657773770718
+speedup_ci  [1.5197227907164157 1.5660087640377276]
+score_us    251093.71513742488
+tests       5/5 passed
+
+scored shapes (µs; speed of light is the reference's bound)
+case                                                         sglang      yours  speedup        sol  
+batch=1 ctx=80000 dist=soft layer=sliding load=turn 1 page=1 q_len=753    1049.62     693.68   1.513x     256.95  
+batch=1 ctx=80000 dist=soft layer=full load=turn 1 page=1 q_len=753    1484.94    1101.98   1.348x     496.69  
+batch=4 ctx=80000 dist=soft layer=sliding load=turn 4 page=1 q_len=753    3367.73    2069.89   1.627x    1036.28  
+batch=4 ctx=80000 dist=soft layer=full load=turn 4 page=1 q_len=753    4938.54    3554.60   1.389x    1992.42  
+batch=1 ctx=0 dist=soft layer=full load=first turn page=1 q_len=16384   18896.74   11168.92   1.692x    5518.43  
+batch=1 ctx=32768 dist=soft layer=sliding load=first turn page=1 q_len=16384   16903.49   10017.56   1.687x    5663.35  
+batch=1 ctx=32768 dist=soft layer=full load=first turn page=1 q_len=16384   21171.82   13793.60   1.535x    7710.00  
+batch=1 ctx=65536 dist=soft layer=full load=first turn page=1 q_len=16384   25041.87   17078.48   1.466x    9847.68  
+
+profile 0: batch=1 ctx=80000 dist=soft layer=sliding load=turn 1 page=1 q_len=753
+kernel                                                           GPU time  share  calls
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     178.1 µs  22.4%      1
+nvjet_sm90_tst_128x192_64x5_2x1_v_bz_coopB_TNN                   152.5 µs  19.2%      3
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     121.2 µs  15.3%      1
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...      94.8 µs  11.9%      1
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...      72.0 µs   9.1%      1
+nvjet_sm90_tst_112x128_64x7_1x2_h_bz_TNN                          38.6 µs   4.9%      1
+void cutlass::device_kernel<flash::enable_sm90_or_later<f...      25.3 µs   3.2%      1
+_ffn_boundary_kernel                                              22.1 µs   2.8%      1
+_attn_boundary_kernel                                             21.5 µs   2.7%      1
+nvjet_sm90_tss_64x96_64x10_2x1_v_bz_splitK_NNT                    13.6 µs   1.7%      1
+_silu_mul_kernel                                                  11.5 µs   1.5%      1
+_combine_kernel                                                    9.2 µs   1.2%      1
+... 9 more
+total                                                            793.9 µs
+GPU busy (kernels overlap: PDL or streams)                       724.0 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more
+
+profile 1: batch=1 ctx=80000 dist=soft layer=full load=turn 1 page=1 q_len=753
+kernel                                                           GPU time  share  calls
+attn_fwd                                                         379.9 µs  29.7%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     183.0 µs  14.3%      1
+nvjet_sm90_tst_128x192_64x5_2x1_v_bz_coopB_TNN                   164.2 µs  12.9%      3
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     143.8 µs  11.3%      1
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...     102.3 µs   8.0%      1
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...      85.5 µs   6.7%      1
+void cublasLt::splitKreduce_kernel<32, 16, int, float, fl...      67.3 µs   5.3%      1
+nvjet_sm90_tst_112x128_64x7_1x2_h_bz_TNN                          39.2 µs   3.1%      1
+_ffn_boundary_kernel                                              22.1 µs   1.7%      1
+_attn_boundary_kernel                                             21.3 µs   1.7%      1
+nvjet_sm90_tss_64x96_64x10_2x1_v_bz_splitK_NNT                    13.2 µs   1.0%      1
+_gather_kv_kernel                                                 11.9 µs   0.9%      1
+... 9 more
+total                                                           1277.8 µs
+GPU busy (kernels overlap: PDL or streams)                      1108.8 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more
+
+profile 2: batch=4 ctx=80000 dist=soft layer=sliding load=turn 4 page=1 q_len=753
+kernel                                                           GPU time  share  calls
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     595.7 µs  27.1%      1
+nvjet_sm90_tst_256x152_64x4_1x2_h_bz_coopA_TNT                   319.6 µs  14.5%      2
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...     314.1 µs  14.3%      1
+nvjet_sm90_tst_128x256_64x4_2x1_v_bz_coopA_TNN                   252.2 µs  11.5%      1
+nvjet_sm90_tst_192x144_64x5_1x2_h_bz_coopB_TNT                   149.2 µs   6.8%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     120.6 µs   5.5%      1
+_ffn_boundary_kernel                                              85.7 µs   3.9%      1
+_attn_boundary_kernel                                             80.0 µs   3.6%      1
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...      72.2 µs   3.3%      1
+void cutlass::device_kernel<flash::enable_sm90_or_later<f...      61.0 µs   2.8%      1
+nvjet_sm90_tss_128x104_64x7_4x2_h_bz_NNT                          38.2 µs   1.7%      1
+_silu_mul_kernel                                                  34.4 µs   1.6%      1
+... 9 more
+total                                                           2197.0 µs
+GPU busy (kernels overlap: PDL or streams)                      2093.3 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more
+
+profile 3: batch=4 ctx=80000 dist=soft layer=full load=turn 4 page=1 q_len=753
+kernel                                                           GPU time  share  calls
+attn_fwd                                                        1438.8 µs  39.1%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     569.2 µs  15.5%      1
+nvjet_sm90_tst_256x152_64x4_1x2_h_bz_coopA_TNT                   320.0 µs   8.7%      2
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...     298.7 µs   8.1%      1
+nvjet_sm90_tst_128x256_64x4_2x1_v_bz_coopA_TNN                   286.3 µs   7.8%      1
+nvjet_sm90_tst_192x144_64x5_1x2_h_bz_coopB_TNT                   148.9 µs   4.0%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...     127.6 µs   3.5%      1
+_ffn_boundary_kernel                                              85.6 µs   2.3%      1
+_attn_boundary_kernel                                             79.3 µs   2.2%      1
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...      77.1 µs   2.1%      1
+_routing_kernel                                                   73.2 µs   2.0%      1
+_gather_kv_kernel                                                 41.6 µs   1.1%      1
+... 9 more
+total                                                           3679.8 µs
+GPU busy (kernels overlap: PDL or streams)                      3509.7 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more
+
+profile 4: batch=1 ctx=0 dist=soft layer=full load=first turn page=1 q_len=16384
+kernel                                                           GPU time  share  calls
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...    3187.9 µs  28.2%      1
+nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN                  2510.3 µs  22.2%      3
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...    1626.8 µs  14.4%      1
+nvjet_sm90_tst_320x128_64x3_1x2_h_bz_coopB_TNT                  1372.2 µs  12.1%      1
+attn_fwd                                                         835.2 µs   7.4%      1
+_ffn_boundary_kernel                                             447.3 µs   4.0%      1
+_attn_boundary_kernel                                            409.7 µs   3.6%      1
+nvjet_sm90_tss_256x128_64x4_1x2_h_bz_coopA_NNT                   282.1 µs   2.5%      1
+_silu_mul_kernel                                                 195.3 µs   1.7%      1
+_combine_kernel                                                  126.3 µs   1.1%      1
+_dispatch_kernel                                                 105.2 µs   0.9%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...      67.7 µs   0.6%      1
+... 8 more
+total                                                          11304.6 µs
+
+profile 5: batch=1 ctx=32768 dist=soft layer=sliding load=first turn page=1 q_len=16384
+kernel                                                           GPU time  share  calls
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...    2802.7 µs  27.6%      1
+nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN                  2499.5 µs  24.6%      3
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...    1439.0 µs  14.2%      1
+nvjet_sm90_tst_320x128_64x3_1x2_h_bz_coopB_TNT                  1367.4 µs  13.5%      1
+_ffn_boundary_kernel                                             450.5 µs   4.4%      1
+_attn_boundary_kernel                                            410.4 µs   4.0%      1
+void cutlass::device_kernel<flash::enable_sm90_or_later<f...     308.3 µs   3.0%      1
+nvjet_sm90_tss_256x128_64x4_1x2_h_bz_coopA_NNT                   281.2 µs   2.8%      1
+_silu_mul_kernel                                                 169.9 µs   1.7%      1
+_combine_kernel                                                  117.3 µs   1.2%      1
+_dispatch_kernel                                                  96.5 µs   1.0%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...      56.4 µs   0.6%      1
+... 8 more
+total                                                          10150.0 µs
+GPU busy (kernels overlap: PDL or streams)                     10040.0 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more
+
+profile 6: batch=1 ctx=32768 dist=soft layer=full load=first turn page=1 q_len=16384
+kernel                                                           GPU time  share  calls
+attn_fwd                                                        4043.3 µs  28.6%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...    2968.5 µs  21.0%      1
+nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN                  2512.5 µs  17.7%      3
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...    1517.8 µs  10.7%      1
+nvjet_sm90_tst_320x128_64x3_1x2_h_bz_coopB_TNT                  1469.9 µs  10.4%      1
+_ffn_boundary_kernel                                             453.3 µs   3.2%      1
+_attn_boundary_kernel                                            409.5 µs   2.9%      1
+_silu_mul_kernel                                                 177.8 µs   1.3%      1
+nvjet_sm90_tss_256x128_64x4_1x2_h_bz_coopA_NNT                   176.3 µs   1.2%      1
+_combine_kernel                                                  122.9 µs   0.9%      1
+_routing_kernel                                                  100.0 µs   0.7%      1
+_dispatch_kernel                                                  98.0 µs   0.7%      1
+... 8 more
+total                                                          14158.7 µs
+GPU busy (kernels overlap: PDL or streams)                     13968.6 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more
+
+profile 7: batch=1 ctx=65536 dist=soft layer=full load=first turn page=1 q_len=16384
+kernel                                                           GPU time  share  calls
+attn_fwd                                                        7212.3 µs  40.9%      1
+void humming<MmaOpClass, Shape<0u, 8192u, 4096u>, Shape<1...    3136.1 µs  17.8%      1
+nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN                  2512.6 µs  14.3%      3
+void humming<MmaOpClass, Shape<0u, 4096u, 4096u>, Shape<1...    1596.7 µs   9.1%      1
+nvjet_sm90_tst_320x128_64x3_1x2_h_bz_coopB_TNT                  1466.4 µs   8.3%      1
+_ffn_boundary_kernel                                             451.9 µs   2.6%      1
+_attn_boundary_kernel                                            408.5 µs   2.3%      1
+_silu_mul_kernel                                                 186.8 µs   1.1%      1
+nvjet_sm90_tss_256x128_64x4_1x2_h_bz_coopA_NNT                   178.9 µs   1.0%      1
+_combine_kernel                                                  123.6 µs   0.7%      1
+_dispatch_kernel                                                 101.8 µs   0.6%      1
+_routing_kernel                                                   96.7 µs   0.5%      1
+... 8 more
+total                                                          17621.2 µs
+GPU busy (kernels overlap: PDL or streams)                     17431.3 µs
+an overlapping kernel's time includes any wait for the one before it, so the rows add up to more

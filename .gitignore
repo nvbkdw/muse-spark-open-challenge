@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 muse_bf16_proj/profiles/
 muse_bf16_proj/probe*.py
+muse_prefill_layer/profiles/
+probes/profiles/
