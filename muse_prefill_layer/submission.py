@@ -990,6 +990,10 @@ def _humming_run(bank, x, out, counts, tuning, valid_m, locks="locks"):
 def _experts_gemm(st, name, x, out, cb, cs, tb, ts, valid_m):
     """Large-expert launch on the current stream and small-expert launch on the side stream, concurrently (the
     small launch is memory-bound and fills the large one's tail: -2..5%). Separate stream-K lock buffers."""
+    if x.shape[0] > LOCAL_EXPERTS * 8192:  # large batches: plain sequential launches (no measurable gain)
+        _humming_run(st[name], x, out, cb, tb, valid_m)
+        _humming_run(st[name], x, out, cs, ts, valid_m, locks="locks2")
+        return
     main, side = torch.cuda.current_stream(), st["side"]
     side.wait_stream(main)
     _humming_run(st[name], x, out, cb, tb, valid_m)
@@ -1051,6 +1055,8 @@ def _buffers(st, tokens, dev):
     count seen (allocated in prepare for 16384 tokens; grown if a larger case shows up)."""
     cap = st.get("cap", 0)
     if tokens > cap:
+        # keep the old buffers alive: graphs captured earlier still point into them
+        st.setdefault("retired", []).extend(st[k] for k in ("xg_buf", "h13_buf", "inter_buf") if k in st)
         rows = LOCAL_EXPERTS * tokens
         st["xg_buf"] = torch.empty(rows * D_EXPERT, dtype=torch.bfloat16, device=dev)
         st["h13_buf"] = torch.empty(rows * 2 * D_EXPERT, dtype=torch.bfloat16, device=dev)
