@@ -63,6 +63,7 @@ struct Params {
   int m, N, K;              // K: actual x row length
   int CPR;                  // 64-wide (virtual) chunks per row
   int rotmul;               // chunk-order rotation multiplier (0 = none)
+  int mslice;               // tokens per blockIdx.y slice (0 = no slicing)
   float scale;
   unsigned long long* tdbg;
 };
@@ -156,7 +157,11 @@ __global__ void __launch_bounds__((WT * WK + 2) * 32, 1) skinny_kernel(const Par
   const int c0 = (rank * CPR) / CL, c1 = ((rank + 1) * CPR) / CL;
   const int nch = c1 - c0;                      // chunks for this CTA (multiple of XK)
   const int nslots = nch / XK;
-  const int m = p.m;
+  // optional token slicing over blockIdx.y (large-m router): this CTA handles tokens [y*mslice, ...)
+  const int ys = blockIdx.y;
+  const int m = p.mslice ? min(p.mslice, p.m - ys * p.mslice) : p.m;
+  const __nv_bfloat16* xsl = p.x + (size_t)ys * p.mslice * p.K;
+  void* outp = p.mslice ? (void*)(reinterpret_cast<uint8_t*>(p.out) + (size_t)ys * p.mslice * p.N * (RAW ? 4 : 2)) : p.out;
   const int XROW = XK * XCH + 16;               // smem bytes per token row of a slot (16 mod 128)
   const int SLOTB = m * XROW;
   const int rot = (int)(((unsigned)bid * (unsigned)p.rotmul) % (unsigned)nslots);  // optional rotated chunk order
@@ -181,7 +186,7 @@ __global__ void __launch_bounds__((WT * WK + 2) * 32, 1) skinny_kernel(const Par
       __syncwarp();
       const size_t goff = (size_t)(c0 + ((si + rot) % nslots) * XK) * XCH;
       for (int tok = lane; tok < m; tok += 32)
-        tma_load_1d(xs + st * SLOTB + tok * XROW, reinterpret_cast<const uint8_t*>(p.x) + (size_t)tok * p.K * 2 + goff, bytes_tok, &full[st]);
+        tma_load_1d(xs + st * SLOTB + tok * XROW, reinterpret_cast<const uint8_t*>(xsl) + (size_t)tok * p.K * 2 + goff, bytes_tok, &full[st]);
 #ifndef XWAITARRIVE
       if (si == XFIRST - 1 || (si == nslots - 1 && nslots < XFIRST)) { __syncwarp(); asm volatile("bar.arrive 2, %0;" :: "r"((NW + 1) * 32) : "memory"); }
 #endif
@@ -206,7 +211,7 @@ __global__ void __launch_bounds__((WT * WK + 2) * 32, 1) skinny_kernel(const Par
       if (lane == 0) p.tdbg[132 * 8 + bid * 4 + 1] = gtime() + 0 * ne;
 #endif
       // lane = token; entries broadcast by shuffle; x loads batched 8 at a time; plain RMW (no races)
-      const unsigned short* xb = reinterpret_cast<const unsigned short*>(p.x) + (size_t)lane * p.K;
+      const unsigned short* xb = reinterpret_cast<const unsigned short*>(xsl) + (size_t)lane * p.K;
       const bool act = lane < m;
       for (int base = 0; base < ne; base += 32) {
         int4 ent = make_int4(0, 0, 0, 0);
@@ -368,12 +373,12 @@ __global__ void __launch_bounds__((WT * WK + 2) * 32, 1) skinny_kernel(const Par
 #pragma unroll
         for (int e = 0; e < 4; ++e) {
           const int tok = mb * 8 + 2 * t + (e & 1);
-          if (tok < m) store_out<OUTF32>(p.out, (size_t)tok * p.N + rg * ROWS + wt * 16 + g + (e >> 1) * 8, acc[mb][e] * sc);
+          if (tok < m) store_out<OUTF32>(outp, (size_t)tok * p.N + rg * ROWS + wt * 16 + g + (e >> 1) * 8, acc[mb][e] * sc);
         }
     } else {
       for (int idx = threadIdx.x; idx < ROWS * m; idx += NW * 32) {
         const int tok = idx / ROWS, r = idx - tok * ROWS;
-        store_out<OUTF32>(p.out, (size_t)tok * p.N + rg * ROWS + r, total(r, tok) * sc);
+        store_out<OUTF32>(outp, (size_t)tok * p.N + rg * ROWS + r, total(r, tok) * sc);
       }
     }
   } else {
@@ -412,7 +417,7 @@ __global__ void __launch_bounds__((WT * WK + 2) * 32, 1) skinny_kernel(const Par
       float v = 0.f;
 #pragma unroll
       for (int c = 0; c < CL; ++c) v += pbuf[((size_t)c * RO + rr) * MT + tok];
-      store_out<OUTF32>(p.out, (size_t)tok * p.N + rg * ROWS + r, v * sc);
+      store_out<OUTF32>(outp, (size_t)tok * p.N + rg * ROWS + r, v * sc);
     }
   }
 #ifdef TIMING
@@ -431,7 +436,8 @@ static size_t smem_bytes(int m) {
 
 template <int WT, int WK, int MB, int D, int CL, int XK, int NSLOT, bool RAW>
 static void launch_t(const Params& p, int grid) {
-  const size_t smem = smem_bytes<WT, WK, MB, D, CL, XK, NSLOT, RAW>(p.m);
+  const int mrows = p.mslice ? p.mslice : p.m;
+  const size_t smem = smem_bytes<WT, WK, MB, D, CL, XK, NSLOT, RAW>(mrows);
   TORCH_CHECK(smem <= 227 * 1024, "skinny: shared memory ", smem, " exceeds the limit");
   auto kern = skinny_kernel<WT, WK, MB, D, CL, XK, NSLOT, RAW>;
   static int cur = 0;
@@ -440,7 +446,7 @@ static void launch_t(const Params& p, int grid) {
     cur = (int)smem;
   }
   cudaLaunchConfig_t cfg = {};
-  cfg.gridDim = dim3(grid);
+  cfg.gridDim = dim3(grid, p.mslice ? (p.m + p.mslice - 1) / p.mslice : 1);
   cfg.blockDim = dim3((WT * WK + 2) * 32);
   cfg.dynamicSmemBytes = smem;
   cfg.stream = at::cuda::getCurrentCUDAStream();
@@ -853,7 +859,7 @@ void wgrun(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor ex
 // mode: 0 = 12-bit compressed bf16 -> bf16, 1 = raw hi/lo router (x duplicated) -> fp32
 void skinny(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor exc_off, torch::Tensor exc,
             int64_t N, int64_t CPR, double scale, int64_t mode, int64_t WT, int64_t WK, int64_t D, int64_t CL,
-            int64_t XK, int64_t NSLOT, torch::Tensor tdbg, int64_t rotmul) {
+            int64_t XK, int64_t NSLOT, torch::Tensor tdbg, int64_t rotmul, int64_t mslice) {
   Params p;
   p.w = reinterpret_cast<const uint8_t*>(w.data_ptr());
   p.x = reinterpret_cast<const __nv_bfloat16*>(x.data_ptr());
@@ -865,9 +871,10 @@ void skinny(torch::Tensor w, torch::Tensor x, torch::Tensor out, torch::Tensor e
   p.N = (int)N;
   p.CPR = (int)CPR;
   p.rotmul = (int)rotmul;
+  p.mslice = (int)mslice;
   p.scale = (float)scale;
   p.tdbg = reinterpret_cast<unsigned long long*>(tdbg.data_ptr());
-  const int MB = (p.m + 7) / 8;
+  const int MB = ((p.mslice ? p.mslice : p.m) + 7) / 8;
   const int g = (int)((N / (16 * WT)) * CL);
   DISPATCH_TABLE
   TORCH_CHECK(false, "skinny: no instantiation for WT=", WT, " WK=", WK, " D=", D, " CL=", CL, " XK=", XK, " NSLOT=", NSLOT, " MB=", MB, " mode=", mode);
@@ -1002,13 +1009,14 @@ def _pack_compressed(w, wt, cl, natural=False):
 CONFIGS = {
     ("qkv_gate", "full"): {"m1": (3, 8, 1, 2, 8, 4), 1: (3, 8, 2, 2, 8, 4), 2: (3, 8, 2, 2, 8, 4),
                            3: (3, 8, 2, 2, 8, 4), 4: None},
-    ("o", "full"): {"m1": (4, 4, 1, 1, 8, 2), 1: (4, 4, 2, 1, 8, 2), 2: (4, 4, 1, 1, 8, 2), 3: None, 4: None},
+    ("o", "full"): {"m1": (4, 4, 1, 1, 8, 2), 1: None, 2: None, 3: None, 4: None},
     ("pooler", "full"): {"m1": (2, 8, 2, 1, 16, 2), 1: (2, 8, 2, 1, 16, 2), 2: (2, 8, 2, 1, 8, 4),
                          3: (4, 4, 2, 2, 8, 4), 4: (4, 4, 2, 2, 8, 4)},
     ("unpooler", "full"): {2: (4, 4, 2, 1, 8, 4), 3: None, 4: None},
     ("unpooler", "slice"): {"m1": (1, 8, 4, 2, 16, 2), 1: (1, 8, 4, 2, 8, 4)},
     ("router", "full"): {"m1": (1, 16, 2, 4, 32, 2), 1: (1, 16, 2, 4, 16, 4), 2: (1, 16, 2, 4, 32, 2),
-                         3: (1, 16, 2, 4, 32, 2), 4: (1, 16, 2, 4, 32, 2)},
+                         3: (1, 16, 2, 4, 32, 2), 4: (1, 16, 2, 4, 32, 2),
+                         },
 }
 
 
@@ -1103,10 +1111,10 @@ def _instantiations(configs):
         for b, cfg in per_b.items():
             if cfg is None:
                 continue
-            WT, WK, D, CL, XK, NS = cfg
-            mbs = (1, 2, 3, 4) if b == "m1" else (b,)  # m1 config also serves m 2..7 (MB 1)
-            for mb in ((1,) if b == "m1" else (b,)):
-                out.append((WT, WK, mb, D, CL, XK, NS, mode))
+            WT, WK, D, CL, XK, NS = cfg[:6]
+            msl = cfg[6] if len(cfg) > 6 else 0
+            mb = 1 if b == "m1" else (msl // 8 if msl else b)
+            out.append((WT, WK, mb, D, CL, XK, NS, mode))
     return out
 
 
@@ -1124,7 +1132,7 @@ def build_packs(weights, configs, hi, lo, packs=None, dev=None):
         for b, cfg in per_b.items():
             if cfg is None:
                 continue
-            WT, WK, D, CL, XK, NS = cfg
+            WT, WK, D, CL, XK, NS = cfg[:6]
             key = (layer, variant, WT, CL)
             if key in packs:
                 continue
@@ -1158,7 +1166,8 @@ def prepare(weights: Weights):
 
 
 def run_skinny(st, x, layer, variant, cfg):
-    WT, WK, D, CL, XK, NS = cfg
+    WT, WK, D, CL, XK, NS = cfg[:6]
+    msl = cfg[6] if len(cfg) > 6 else 0
     kind, pk, eo, ex, sc, N, CPR = st["packs"][(layer, variant, WT, CL)]
     m = x.shape[0]
     if kind == "raw":
@@ -1166,10 +1175,10 @@ def run_skinny(st, x, layer, variant, cfg):
     assert (CPR // CL) % XK == 0 and CPR % CL == 0 and XK % WK == 0
     if kind == "rtr":
         out = torch.empty((m, N), dtype=torch.float32, device=x.device)
-        st["ext"].skinny(pk, x, out, st["dummy_off"], st["dummy_exc"], N, CPR, 1.0, 1, WT, WK, D, CL, XK, NS, st["tdbg"], st.get("rotmul", ROTMUL))
+        st["ext"].skinny(pk, x, out, st["dummy_off"], st["dummy_exc"], N, CPR, 1.0, 1, WT, WK, D, CL, XK, NS, st["tdbg"], st.get("rotmul", ROTMUL), msl)
     else:
         out = torch.empty((m, N), dtype=torch.bfloat16, device=x.device)
-        st["ext"].skinny(pk, x, out, eo, ex, N, CPR, sc, 0, WT, WK, D, CL, XK, NS, st["tdbg"], st.get("rotmul", ROTMUL))
+        st["ext"].skinny(pk, x, out, eo, ex, N, CPR, sc, 0, WT, WK, D, CL, XK, NS, st["tdbg"], st.get("rotmul", ROTMUL), msl)
     return out
 
 
