@@ -1,0 +1,7 @@
+cases 189 failures 0
+seed1 packs: ['cmp', 'rtr'] fallback packs: []
+seed2 packs: ['cmp', 'rtr'] fallback packs: []
+seed12345 packs: ['cmp', 'rtr'] fallback packs: []
+scaled+zeros packs: ['cmp', 'raw', 'rtr'] fallback packs: [('o', 'full')]
+wide-range packs: ['cmp', 'raw', 'rtr'] fallback packs: [('pooler', 'full'), ('pooler', 'full')]
+failures 0

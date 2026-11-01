@@ -1,0 +1,37 @@
+decode 1   m=   1 qkv_gate  base   15.71us sub   12.13us  x1.295  OK
+decode 1   m=   1 o         base    6.91us sub    5.93us  x1.165  OK
+decode 1   m=   1 pooler    base   25.95us sub   19.71us  x1.317  OK
+decode 1   m=   1 unpooler  base    6.59us sub    4.79us  x1.376  OK
+decode 1   m=   1 router    base   10.75us sub    5.78us  x1.859  OK
+decode 16  m=  16 qkv_gate  base   16.38us sub   13.64us  x1.201  OK
+decode 16  m=  16 o         base    6.66us sub    6.72us  x0.990  OK
+decode 16  m=  16 pooler    base   26.08us sub   20.54us  x1.270  OK
+decode 16  m=  16 unpooler  base   23.50us sub   20.84us  x1.128  OK
+decode 16  m=  16 router    base   15.42us sub    6.73us  x2.294  OK
+decode 32  m=  32 qkv_gate  base   16.50us sub   16.61us  x0.993  OK
+decode 32  m=  32 o         base    6.85us sub    6.80us  x1.007  OK
+decode 32  m=  32 pooler    base   26.58us sub   24.54us  x1.083  OK
+decode 32  m=  32 unpooler  base   23.89us sub   23.97us  x0.997  OK
+decode 32  m=  32 router    base   16.10us sub    7.57us  x2.127  OK
+verify 1   m=   8 qkv_gate  base   16.11us sub   13.01us  x1.238  OK
+verify 1   m=   8 o         base    6.66us sub    6.85us  x0.972  OK
+verify 1   m=   8 pooler    base   26.05us sub   19.90us  x1.309  OK
+verify 1   m=   8 unpooler  base    6.72us sub    5.42us  x1.240  OK
+verify 1   m=   8 router    base   26.34us sub    6.31us  x4.173  OK
+verify 16  m= 128 qkv_gate  base   18.56us sub   18.83us  x0.986  OK
+verify 16  m= 128 o         base    7.49us sub    7.55us  x0.991  OK
+verify 16  m= 128 pooler    base   25.30us sub   25.54us  x0.991  OK
+verify 16  m= 128 unpooler  base   24.69us sub   25.07us  x0.985  OK
+verify 16  m= 128 router    base   17.28us sub   10.81us  x1.599  OK
+verify 32  m= 256 qkv_gate  base   19.26us sub   19.46us  x0.990  OK
+verify 32  m= 256 o         base    8.51us sub    8.61us  x0.989  OK
+verify 32  m= 256 pooler    base   32.38us sub   32.46us  x0.998  OK
+verify 32  m= 256 unpooler  base   26.64us sub   26.64us  x1.000  OK
+verify 32  m= 256 router    base   18.77us sub   12.01us  x1.563  OK
+LOAD decode 1   base   65.92 sub   48.35 x1.363
+LOAD decode 16  base   88.05 sub   68.47 x1.286
+LOAD decode 32  base   89.90 sub   79.48 x1.131
+LOAD verify 1   base   81.87 sub   51.49 x1.590
+LOAD verify 16  base   93.31 sub   87.80 x1.063
+LOAD verify 32  base  105.57 sub   99.17 x1.064
+GEOMEAN x1.2361  (fixed replay cost 5.73us)

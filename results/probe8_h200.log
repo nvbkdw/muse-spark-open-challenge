@@ -1,0 +1,35 @@
+PROBE compile 50.7s insts 38
+PROBE fixed 5.41
+SWEEP qkv_gate m1  (3, 4, 4, 2, 16, 2) rot7:  13.38us err 1.6e-03 | xready 1.28/1.54 loop_end 12.80/13.82 end 14.34/15.10
+SWEEP qkv_gate m16 (3, 4, 4, 2, 16, 2) rot7:  14.66us err 1.7e-03 | xready 1.79/2.82 loop_end 12.54/13.57 end 14.34/14.85
+SWEEP qkv_gate m1  (3, 8, 2, 2, 8, 4) rot7:  10.72us err 1.7e-03 | xready 1.02/1.02 loop_end 8.70/9.47 end 10.24/10.50
+SWEEP qkv_gate m16 (3, 8, 2, 2, 8, 4) rot7:  12.32us err 1.7e-03 | xready 1.54/1.79 loop_end 10.24/11.01 end 12.03/12.29
+SWEEP qkv_gate m1  (3, 8, 4, 2, 8, 4) rot7:  12.77us err 1.7e-03 | xready 2.56/4.10 loop_end 10.75/11.78 end 12.03/12.80
+SWEEP qkv_gate m16 (3, 8, 4, 2, 8, 4) rot7:  15.49us err 1.7e-03 | xready 4.10/6.40 loop_end 13.06/13.82 end 14.85/15.62
+SWEEP qkv_gate m1  (6, 4, 2, 4, 8, 4) rot7:  10.91us err 1.7e-03 | xready 1.28/1.28 loop_end 8.96/9.73 end 10.50/11.01
+SWEEP qkv_gate m16 (6, 4, 2, 4, 8, 4) rot7:  12.74us err 1.7e-03 | xready 1.54/1.79 loop_end 11.26/12.29 end 13.57/14.34
+SWEEP qkv_gate m1  (6, 4, 4, 4, 8, 4) rot7:  12.96us err 1.7e-03 | xready 2.56/4.10 loop_end 10.75/11.52 end 12.29/12.80
+SWEEP qkv_gate m16 (6, 4, 4, 4, 8, 4) rot7:  15.84us err 1.7e-03 | xready 4.10/6.66 loop_end 12.80/14.08 end 15.10/15.87
+SWEEP qkv_gate m1  (2, 8, 2, 1, 8, 4) rot7:  13.38us err 1.6e-03 | xready 1.02/1.28 loop_end 12.29/13.31 end 13.06/13.57
+SWEEP qkv_gate m16 (2, 8, 2, 1, 8, 4) rot7:  17.02us err 1.7e-03 | xready 1.28/1.54 loop_end 16.38/16.64 end 16.90/17.15
+SWEEP qkv_gate m1  (2, 8, 4, 1, 16, 2) rot7:  13.38us err 1.6e-03 | xready 1.28/1.54 loop_end 12.29/12.80 end 12.80/13.31
+SWEEP qkv_gate m16 (2, 8, 4, 1, 16, 2) rot7:  15.07us err 1.7e-03 | xready 2.05/2.05 loop_end 14.08/14.85 end 14.59/15.36
+SWEEP qkv_gate m1  (3, 4, 6, 2, 8, 4) rot7:  13.50us err 1.7e-03 | xready 1.54/1.54 loop_end 11.78/12.29 end 13.06/13.57
+SWEEP qkv_gate m16 (3, 4, 6, 2, 8, 4) rot7:  14.78us err 1.7e-03 | xready 1.79/2.05 loop_end 12.54/13.31 end 14.08/15.10
+SWEEP qkv_gate m8  (3, 4, 4, 2, 16, 2) rot7:  13.95us err 1.6e-03 | xready 1.54/1.54 loop_end 12.03/12.54 end 13.57/14.08
+SWEEP qkv_gate m8  (3, 8, 2, 2, 8, 4) rot7:  11.04us err 1.7e-03 | xready 1.28/1.28 loop_end 9.22/9.47 end 10.50/11.01
+SWEEP qkv_gate m8  (3, 8, 4, 2, 8, 4) rot7:  13.31us err 1.7e-03 | xready 2.56/4.35 loop_end 11.01/12.29 end 12.54/13.31
+SWEEP qkv_gate m8  (6, 4, 2, 4, 8, 4) rot7:  11.39us err 1.7e-03 | xready 1.28/1.54 loop_end 9.22/9.98 end 11.26/11.52
+SWEEP qkv_gate m8  (6, 4, 4, 4, 8, 4) rot7:  13.57us err 1.6e-03 | xready 3.07/4.86 loop_end 11.01/12.29 end 13.06/13.57
+SWEEP qkv_gate m8  (2, 8, 2, 1, 8, 4) rot7:  13.73us err 1.7e-03 | xready 1.02/1.28 loop_end 12.54/13.31 end 13.31/13.82
+SWEEP qkv_gate m8  (2, 8, 4, 1, 16, 2) rot7:  13.41us err 1.7e-03 | xready 1.54/1.79 loop_end 12.54/13.31 end 13.06/13.57
+SWEEP qkv_gate m8  (3, 4, 6, 2, 8, 4) rot7:  13.92us err 1.7e-03 | xready 1.79/1.79 loop_end 13.06/13.82 end 14.59/15.10
+SWEEP o        m32 (4, 4, 2, 1, 8, 2) rot7:   7.87us err 1.7e-03 | xready 2.30/3.33 loop_end 6.40/7.17 end 7.42/8.19
+SWEEP o        m32 (2, 8, 2, 2, 8, 2) rot7:  20.86us err 1.7e-03 | xready 2.05/2.56 loop_end 3.07/3.58 end 4.86/5.38
+SWEEP o        m32 (4, 4, 4, 1, 8, 2) rot7:   8.77us err 1.7e-03 | xready 2.30/2.82 loop_end 7.42/8.19 end 8.45/8.96
+SWEEP unpooler m32 (4, 4, 2, 1, 16, 2) rot7:  19.49us err 1.7e-03 | xready 2.82/3.58 loop_end 17.15/18.94 end 18.43/19.71
+SWEEP unpooler m32 (4, 4, 2, 1, 8, 4) rot7:  18.82us err 1.7e-03 | xready 2.05/3.07 loop_end 16.90/18.18 end 18.18/18.94
+SWEEP unpooler m32 (8, 2, 2, 2, 8, 4) rot7:  22.46us err 1.7e-03 | xready 3.07/4.35 loop_end 17.15/18.18 end 22.02/22.78
+SWEEP pooler   m1  (4, 4, 2, 2, 8, 4) rot7:  16.13us err 1.7e-03 | xready 1.02/1.02 loop_end 13.57/15.10 end 15.36/16.13
+SWEEP pooler m1 (4, 8, 2, 2, 8, 4): FAIL CUDA error: invalid argument
+PROBE total 98.3s
