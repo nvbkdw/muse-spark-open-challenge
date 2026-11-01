@@ -244,13 +244,23 @@ def _gemm_cfg(bm, bn=256, bk=64, stages=4, stream_k=True):
             "use_mbarrier": True}
 
 
-def _tuning_for(tokens, which):
-    """Per-shape kernel config (by tokens in the batch)."""
-    if tokens <= 1024:
-        return _gemm_cfg(48, 256, 128)
-    if tokens <= 4096:
-        return _gemm_cfg(128, 256, 64)
+SPLIT_ROWS = 64  # experts with more routes than this run in the large-tile launch
+
+
+def _tuning_big(tokens):
     return _gemm_cfg(176, 256, 64)
+
+
+def _tuning_small(tokens):
+    return _gemm_cfg(32, 256, 128)
+
+
+@triton.jit
+def _split_counts_kernel(cnt_ptr, big_ptr, small_ptr, THR: tl.constexpr):
+    e = tl.arange(0, 32)
+    c = tl.load(cnt_ptr + e)
+    tl.store(big_ptr + e, tl.where(c > THR, c, 0))
+    tl.store(small_ptr + e, tl.where(c > THR, 0, c))
 
 
 def _humming_run(bank, x, out, counts, tuning, valid_m):
@@ -295,13 +305,15 @@ def prepare(weights):
     st["w13"]["locks"] = torch.zeros(1024, dtype=torch.int32, device=dev)
     st["w2"]["locks"] = torch.zeros(1024, dtype=torch.int32, device=dev)
     st["cnt"] = torch.zeros(LOCAL_EXPERTS, dtype=torch.int32, device=dev)
+    st["cnt_big"] = torch.zeros(LOCAL_EXPERTS, dtype=torch.int32, device=dev)
+    st["cnt_small"] = torch.zeros(LOCAL_EXPERTS, dtype=torch.int32, device=dev)
     st["side"] = torch.cuda.Stream(dev)
     _buffers(st, 16384, dev)
     # Pre-build (JIT) the expert GEMM kernels for the token counts we expect.
     from humming.kernel.humming import HummingKernel
-    for tokens in (300, 753, 4096, 16384):
-        for name in ("w13", "w2"):
-            HummingKernel.prepare_kernels(st[name]["config"], _CC, json.dumps(_tuning_for(tokens, name)))
+    for name in ("w13", "w2"):
+        for tuning in (_tuning_big(0), _tuning_small(0)):
+            HummingKernel.prepare_kernels(st[name]["config"], _CC, json.dumps(tuning))
     torch.cuda.synchronize()
     return st
 
@@ -385,9 +397,14 @@ def kernel_fn(data, st):
     xg, h13, inter, y = bufs["xg"], bufs["h13"], bufs["inter"], bufs["y"]
     _dispatch_kernel[(T,)](p, st["w_pre_exp"], rowmap, xg, N=D_EXPERT, num_warps=8)
     valid_m = max(T * 2, 1)
-    _humming_run(st["w13"], xg, h13, cnt, _tuning_for(T, "w13"), valid_m)
+    cb, cs = st["cnt_big"], st["cnt_small"]
+    _split_counts_kernel[(1,)](cnt, cb, cs, THR=SPLIT_ROWS, num_warps=1)
+    tb, ts = _tuning_big(T), _tuning_small(T)
+    _humming_run(st["w13"], xg, h13, cb, tb, valid_m)
+    _humming_run(st["w13"], xg, h13, cs, ts, valid_m)
     _silu_mul_kernel[(T,)](h13, rowmap, inter, N=D_EXPERT, num_warps=8)
-    _humming_run(st["w2"], inter, y, cnt, _tuning_for(T, "w2"), valid_m)
+    _humming_run(st["w2"], inter, y, cb, tb, valid_m)
+    _humming_run(st["w2"], inter, y, cs, ts, valid_m)
     moe = torch.empty((T, D_EXPERT), dtype=torch.bfloat16, device=dev)
     _combine_kernel[(T,)](y, rowmap, tw, st["w_post_exp"], moe, N=D_EXPERT, num_warps=8)
 
